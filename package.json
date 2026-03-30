@@ -77,6 +77,51 @@
       {
         "command": "fileTag.clearLastView",
         "title": "File Tag: Clear Last View (Dev)"
+      },
+      {
+        "command": "fileTag.openToSide",
+        "title": "Open to the Side"
+      },
+      {
+        "command": "fileTag.revealInExplorer",
+        "title": "Reveal in Explorer View"
+      },
+      {
+        "command": "fileTag.revealInOS",
+        "title": "Reveal in File Explorer"
+      },
+      {
+        "command": "fileTag.openInTerminal",
+        "title": "Open in Integrated Terminal"
+      },
+      {
+        "command": "fileTag.copyPath",
+        "title": "Copy Path"
+      },
+      {
+        "command": "fileTag.copyRelativePath",
+        "title": "Copy Relative Path"
+      },
+      {
+        "command": "fileTag.copyFile",
+        "title": "Copy"
+      },
+      {
+        "command": "fileTag.pasteFile",
+        "title": "Paste"
+      },
+      {
+        "command": "fileTag.duplicateFile",
+        "title": "Duplicate"
+      },
+      {
+        "command": "fileTag.renameFile",
+        "title": "Rename..."
+      },
+      {
+        "command": "fileTag.deleteFile",
+        "title": "Delete",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -112,6 +157,61 @@
           "command": "fileTag.deleteView",
           "when": "view == fileTagView && viewItem == fileTagViewListItem",
           "group": "inline"
+        },
+        {
+          "command": "fileTag.openToSide",
+          "when": "view == fileTagView && viewItem == fileTagFile",
+          "group": "navigation@1"
+        },
+        {
+          "command": "fileTag.revealInExplorer",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "navigation@2"
+        },
+        {
+          "command": "fileTag.revealInOS",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "navigation@3"
+        },
+        {
+          "command": "fileTag.openInTerminal",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "2_workspace@1"
+        },
+        {
+          "command": "fileTag.copyFile",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "5_cutcopypaste@1"
+        },
+        {
+          "command": "fileTag.pasteFile",
+          "when": "view == fileTagView && viewItem == fileTagDir && fileTag.clipboardHasFile",
+          "group": "5_cutcopypaste@2"
+        },
+        {
+          "command": "fileTag.duplicateFile",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "5_cutcopypaste@3"
+        },
+        {
+          "command": "fileTag.copyPath",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "5_cutcopypaste@4"
+        },
+        {
+          "command": "fileTag.copyRelativePath",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "5_cutcopypaste@5"
+        },
+        {
+          "command": "fileTag.renameFile",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "7_modification@1"
+        },
+        {
+          "command": "fileTag.deleteFile",
+          "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
+          "group": "7_modification@2"
         }
       ]
     }

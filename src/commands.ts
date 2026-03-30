@@ -1,12 +1,39 @@
 import * as vscode from "vscode";
 import { extractGlobs } from "./evaluator";
 import { ConfigManager } from "./config";
-import { FileTagTreeDataProvider, TreeNode } from "./treeDataProvider";
+import { FileTagTreeDataProvider, TreeNode, DirNode } from "./treeDataProvider";
 
 
 const LAST_VIEW_KEY = "fileTag.lastView";
 const WORKSPACE_FOLDER_PREFIX = "{WORKSPACE_FOLDER}/";
 
+// Internal clipboard for copy/paste file operations
+let copyClipboard: vscode.Uri | undefined;
+
+function nodeUri(node: TreeNode, workspaceFolder: vscode.WorkspaceFolder): vscode.Uri {
+  if (node.kind === "file") return node.uri;
+  return vscode.Uri.joinPath(workspaceFolder.uri, (node as DirNode).relativePath);
+}
+
+async function findFreeCopyUri(uri: vscode.Uri): Promise<vscode.Uri> {
+  const name = uri.path.split("/").pop()!;
+  const dot = name.lastIndexOf(".");
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const ext  = dot > 0 ? name.slice(dot)    : "";
+  const parent = vscode.Uri.joinPath(uri, "..");
+
+  let candidate = vscode.Uri.joinPath(parent, `${base} copy${ext}`);
+  let n = 2;
+  while (true) {
+    try {
+      await vscode.workspace.fs.stat(candidate);
+      candidate = vscode.Uri.joinPath(parent, `${base} copy ${n}${ext}`);
+      n++;
+    } catch {
+      return candidate;
+    }
+  }
+}
 
 
 export function registerCommands(
@@ -174,6 +201,109 @@ export function registerCommands(
     vscode.commands.registerCommand("fileTag.clearLastView", async () => {
       await context.workspaceState.update(LAST_VIEW_KEY, undefined);
       vscode.window.showInformationMessage("Last view cleared. Reload the window to see the view list.");
+    }),
+
+    // --- File / directory context menu actions ---
+
+    vscode.commands.registerCommand("fileTag.openToSide", async (node: TreeNode) => {
+      if (node.kind !== "file") return;
+      await vscode.commands.executeCommand("vscode.open", node.uri, { viewColumn: vscode.ViewColumn.Beside });
+    }),
+
+    vscode.commands.registerCommand("fileTag.revealInExplorer", async (node: TreeNode) => {
+      const uri = node.kind === "file" ? node.uri
+        : vscode.Uri.joinPath(workspaceFolder.uri, (node as DirNode).relativePath);
+      await vscode.commands.executeCommand("revealInExplorer", uri);
+    }),
+
+    vscode.commands.registerCommand("fileTag.revealInOS", async (node: TreeNode) => {
+      const uri = node.kind === "file" ? node.uri
+        : vscode.Uri.joinPath(workspaceFolder.uri, (node as DirNode).relativePath);
+      await vscode.commands.executeCommand("revealFileInOS", uri);
+    }),
+
+    vscode.commands.registerCommand("fileTag.openInTerminal", async (node: TreeNode) => {
+      const uri = node.kind === "file"
+        ? vscode.Uri.joinPath(node.uri, "..")
+        : vscode.Uri.joinPath(workspaceFolder.uri, (node as DirNode).relativePath);
+      vscode.window.createTerminal({ cwd: uri }).show();
+    }),
+
+    vscode.commands.registerCommand("fileTag.copyPath", async (node: TreeNode) => {
+      const uri = node.kind === "file" ? node.uri
+        : vscode.Uri.joinPath(workspaceFolder.uri, (node as DirNode).relativePath);
+      await vscode.env.clipboard.writeText(uri.fsPath);
+    }),
+
+    vscode.commands.registerCommand("fileTag.copyRelativePath", async (node: TreeNode) => {
+      const uri = node.kind === "file" ? node.uri
+        : vscode.Uri.joinPath(workspaceFolder.uri, (node as DirNode).relativePath);
+      await vscode.env.clipboard.writeText(vscode.workspace.asRelativePath(uri, false));
+    }),
+
+    vscode.commands.registerCommand("fileTag.copyFile", async (node: TreeNode) => {
+      copyClipboard = nodeUri(node, workspaceFolder);
+      vscode.commands.executeCommand("setContext", "fileTag.clipboardHasFile", true);
+    }),
+
+    vscode.commands.registerCommand("fileTag.pasteFile", async (node: TreeNode) => {
+      if (!copyClipboard) return;
+      const dirUri = nodeUri(node, workspaceFolder);
+      const fileName = copyClipboard.path.split("/").pop()!;
+      const targetUri = vscode.Uri.joinPath(dirUri, fileName);
+      try {
+        await vscode.workspace.fs.copy(copyClipboard, targetUri, { overwrite: false });
+        await treeDataProvider.refresh();
+      } catch (e) {
+        vscode.window.showErrorMessage(`Paste failed: ${e}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("fileTag.duplicateFile", async (node: TreeNode) => {
+      const uri = nodeUri(node, workspaceFolder);
+      const newUri = await findFreeCopyUri(uri);
+      try {
+        await vscode.workspace.fs.copy(uri, newUri, { overwrite: false });
+        await treeDataProvider.refresh();
+      } catch (e) {
+        vscode.window.showErrorMessage(`Duplicate failed: ${e}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("fileTag.renameFile", async (node: TreeNode) => {
+      const uri = nodeUri(node, workspaceFolder);
+      const dot = node.name.lastIndexOf(".");
+      const selEnd = node.kind === "file" && dot > 0 ? dot : node.name.length;
+      const newName = await vscode.window.showInputBox({
+        prompt: "New name",
+        value: node.name,
+        valueSelection: [0, selEnd],
+        validateInput: v => v.includes("/") || v.includes("\\") ? "Name cannot contain path separators" : undefined,
+      });
+      if (!newName || newName === node.name) return;
+      const newUri = vscode.Uri.joinPath(uri, "..", newName);
+      try {
+        await vscode.workspace.fs.rename(uri, newUri, { overwrite: false });
+        await treeDataProvider.refresh();
+      } catch (e) {
+        vscode.window.showErrorMessage(`Rename failed: ${e}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("fileTag.deleteFile", async (node: TreeNode) => {
+      const uri = nodeUri(node, workspaceFolder);
+      const answer = await vscode.window.showWarningMessage(
+        `Delete "${node.name}"?`,
+        { modal: true },
+        "Move to Trash",
+      );
+      if (answer !== "Move to Trash") return;
+      try {
+        await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
+        await treeDataProvider.refresh();
+      } catch (e) {
+        vscode.window.showErrorMessage(`Delete failed: ${e}`);
+      }
     }),
   );
 }
