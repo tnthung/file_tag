@@ -192,7 +192,10 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   getTreeItem(node: TreeNode): vscode.TreeItem {
     switch (node.kind) {
       case "category": {
-        const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
+        const state = node.label === "Tags"
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.Expanded;
+        const item = new vscode.TreeItem(node.label, state);
         item.contextValue = node.label === "Views" ? "fileTagCategoryViews" : "fileTagCategoryTags";
         return item;
       }
