@@ -1,0 +1,106 @@
+{
+  "name": "file-tag",
+  "displayName": "File Tag",
+  "description": "Tag files with glob patterns and create filtered views with logical conditions",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:fileTagView"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "fileTagContainer",
+          "title": "File Tag",
+          "icon": "media/tag.svg"
+        }
+      ]
+    },
+    "views": {
+      "fileTagContainer": [
+        {
+          "id": "fileTagView",
+          "name": "File Tag"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "fileTagView",
+        "contents": "No view selected.\n[Select a View](command:fileTag.selectView)\n[Open Config](command:fileTag.openConfig)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "fileTag.createTag",
+        "title": "File Tag: Create Tag"
+      },
+      {
+        "command": "fileTag.addFiles",
+        "title": "File Tag: Add Files to Tag"
+      },
+      {
+        "command": "fileTag.selectView",
+        "title": "File Tag: Select View",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "fileTag.searchInView",
+        "title": "File Tag: Search in View",
+        "icon": "$(search)"
+      },
+      {
+        "command": "fileTag.openConfig",
+        "title": "File Tag: Open Config",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "fileTag.refreshView",
+        "title": "File Tag: Refresh",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "fileTag.selectView",
+          "when": "view == fileTagView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "fileTag.searchInView",
+          "when": "view == fileTagView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "fileTag.refreshView",
+          "when": "view == fileTagView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "fileTag.openConfig",
+          "when": "view == fileTagView",
+          "group": "navigation@4"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0",
+    "esbuild": "^0.24.0"
+  }
+}
