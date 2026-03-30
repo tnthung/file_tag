@@ -121,6 +121,8 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   private showingFiles = false;
   private loading = false;
   private rootNodes: TreeNode[] = [];
+  private fileNodeByUri = new Map<string, FileNode>();
+  private parentByNode = new WeakMap<TreeNode, TreeNode | undefined>();
 
   // Selection-mode data
   private viewNodes: ViewListNode[] = [];
@@ -131,6 +133,32 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     private readonly workspaceFolder: vscode.WorkspaceFolder,
   ) {}
 
+  private clearFileTree(): void {
+    this.rootNodes = [];
+    this.fileNodeByUri.clear();
+    this.parentByNode = new WeakMap<TreeNode, TreeNode | undefined>();
+  }
+
+  private setRootNodes(nodes: TreeNode[]): void {
+    this.clearFileTree();
+    this.rootNodes = nodes;
+
+    const visit = (items: TreeNode[], parent: TreeNode | undefined): void => {
+      for (const item of items) {
+        this.parentByNode.set(item, parent);
+        if (item.kind === "file") {
+          this.fileNodeByUri.set(item.uri.toString(), item);
+          continue;
+        }
+
+        if (item.kind === "dir")
+          visit(item.children, item);
+      }
+    };
+
+    visit(nodes, undefined);
+  }
+
   getCurrentViewName(): string | undefined {
     return this.currentViewName;
   }
@@ -139,6 +167,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     this.currentViewName = undefined;
     this.previewState = undefined;
     this.showingFiles = false;
+    this.clearFileTree();
     await this.loadViews();
   }
 
@@ -147,11 +176,14 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     this.previewState = { name, patterns };
     this.showingFiles = true;
     this.loading = true;
+    this.clearFileTree();
+
     vscode.commands.executeCommand("setContext", "fileTag.selectingView", false);
     this._onDidChangeTreeData.fire();
+
     try {
       const uris = await resolveTag(patterns, this.workspaceFolder);
-      this.rootNodes = buildTreeFromParts(uris, this.workspaceFolder);
+      this.setRootNodes(buildTreeFromParts(uris, this.workspaceFolder));
     } finally {
       this.loading = false;
       this._onDidChangeTreeData.fire();
@@ -172,6 +204,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
       patterns,
     }));
 
+    this.clearFileTree();
     vscode.commands.executeCommand("setContext", "fileTag.selectingView", true);
     this._onDidChangeTreeData.fire();
   }
@@ -181,16 +214,19 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     this.previewState = undefined;
     this.showingFiles = true;
     this.loading = true;
+
+    this.clearFileTree();
     vscode.commands.executeCommand("setContext", "fileTag.selectingView", false);
     this._onDidChangeTreeData.fire();
+
     try {
       const config = await this.configManager.read();
       const condition = config.views[viewName];
-      this.rootNodes = condition
+      this.setRootNodes(condition
         ? buildTreeFromParts(
-            await evaluateCondition(condition, config, this.workspaceFolder),
-            this.workspaceFolder)
-        : [];
+          await evaluateCondition(condition, config, this.workspaceFolder),
+          this.workspaceFolder)
+        : []);
     } finally {
       this.loading = false;
       this._onDidChangeTreeData.fire();
@@ -285,33 +321,11 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     if (node.kind === "tag") return CATEGORY_TAGS;
     if (node.kind === "tagPattern") return node.parent;
 
-    // File tree parents
-    const search = (nodes: TreeNode[], parent?: TreeNode): TreeNode | undefined => {
-      for (const child of nodes) {
-        if (child === node) return parent;
-        if (child.kind === "dir") {
-          const found = search(child.children, child);
-          if (found !== undefined) return found;
-        }
-      }
-    };
-
-    return search(this.rootNodes);
+    return this.parentByNode.get(node);
   }
 
   findFileNode(uri: vscode.Uri): FileNode | undefined {
-    const target = uri.toString();
-    const search = (nodes: TreeNode[]): FileNode | undefined => {
-      for (const node of nodes) {
-        if (node.kind === "file" && node.uri.toString() === target) return node;
-        if (node.kind === "dir") {
-          const found = search(node.children);
-          if (found) return found;
-        }
-      }
-    };
-
-    return search(this.rootNodes);
+    return this.fileNodeByUri.get(uri.toString());
   }
 
   dispose(): void {
