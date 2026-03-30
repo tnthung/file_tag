@@ -158,24 +158,24 @@
           "group": "navigation@1"
         },
         {
+          "command": "fileTag.collapseAll",
+          "when": "view == fileTagView && !fileTag.selectingView",
+          "group": "navigation@2"
+        },
+        {
           "command": "fileTag.searchInView",
           "when": "view == fileTagView && !fileTag.selectingView",
           "group": "navigation@3"
         },
         {
-          "command": "fileTag.refreshView",
+          "command": "fileTag.openConfig",
           "when": "view == fileTagView",
           "group": "navigation@4"
         },
         {
-          "command": "fileTag.collapseAll",
-          "when": "view == fileTagView && !fileTag.selectingView",
-          "group": "navigation@5"
-        },
-        {
-          "command": "fileTag.openConfig",
+          "command": "fileTag.refreshView",
           "when": "view == fileTagView",
-          "group": "navigation@6"
+          "group": "navigation@5"
         }
       ],
       "view/item/context": [
