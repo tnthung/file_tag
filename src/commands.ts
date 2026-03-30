@@ -19,6 +19,28 @@ const WORKSPACE_FOLDER_PREFIX = "{WORKSPACE_FOLDER}/";
 // Internal clipboard for copy/paste file operations
 let copyClipboard: vscode.Uri | undefined;
 
+function removeTagFromCondition(cond: ViewCondition, tagName: string): ViewCondition {
+  if (typeof cond === "string") return cond === tagName ? [] : cond;
+  if (Array.isArray(cond)) return cond.filter(t => t !== tagName);
+
+  if ("or"  in cond) {
+    const children = cond.or.map( c => removeTagFromCondition(c, tagName)).filter(c => !Array.isArray(c) || c.length > 0);
+    return children.length === 0 ? [] : { or: children };
+  }
+
+  if ("and" in cond) {
+    const children = cond.and.map(c => removeTagFromCondition(c, tagName)).filter(c => !Array.isArray(c) || c.length > 0);
+    return children.length === 0 ? [] : { and: children };
+  }
+
+  if ("not" in cond) {
+    const inner = removeTagFromCondition(cond.not, tagName);
+    return Array.isArray(inner) && inner.length === 0 ? [] : { not: inner };
+  }
+
+  return cond;
+}
+
 function renameTagInCondition(cond: ViewCondition, oldName: string, newName: string): ViewCondition {
   if (typeof cond === "string") return cond === oldName ? newName : cond;
   if (Array.isArray(cond)) return cond.map(t => t === oldName ? newName : t);
@@ -327,6 +349,8 @@ export function registerCommands(
       if (answer !== "Delete") return;
       const config = await configManager.read();
       delete config.tags[node.name];
+      for (const [viewName, condition] of Object.entries(config.views))
+        config.views[viewName] = removeTagFromCondition(condition, node.name);
       await configManager.write(config);
     }),
 
