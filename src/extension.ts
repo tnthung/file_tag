@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { ConfigManager } from "./config";
 import { registerCommands } from "./commands";
-import { FileTagTreeDataProvider } from "./treeDataProvider";
+import { FileTagTreeDataProvider, TreeNode } from "./treeDataProvider";
 
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const configManager = new ConfigManager(workspaceFolder);
   const treeDataProvider = new FileTagTreeDataProvider(configManager, workspaceFolder);
 
-  const treeView = vscode.window.createTreeView("fileTagView", {
+  const treeView = vscode.window.createTreeView<TreeNode>("fileTagView", {
     treeDataProvider,
   });
 

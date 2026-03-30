@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { extractGlobs } from "./evaluator";
 import { ConfigManager } from "./config";
-import { FileTagTreeDataProvider } from "./treeDataProvider";
+import { FileTagTreeDataProvider, TreeNode } from "./treeDataProvider";
 
 
 const WORKSPACE_FOLDER_PREFIX = "{WORKSPACE_FOLDER}/";
@@ -11,7 +11,7 @@ export function registerCommands(
   context: vscode.ExtensionContext,
   configManager: ConfigManager,
   treeDataProvider: FileTagTreeDataProvider,
-  treeView: vscode.TreeView<vscode.Uri>,
+  treeView: vscode.TreeView<TreeNode>,
   workspaceFolder: vscode.WorkspaceFolder,
 ): void {
   context.subscriptions.push(
