@@ -72,41 +72,41 @@
       },
       {
         "command": "fileTag.editView",
-        "title": "File Tag: Edit View",
+        "title": "Edit",
         "icon": "$(gear)"
       },
       {
         "command": "fileTag.renameView",
-        "title": "File Tag: Rename View",
+        "title": "Rename",
         "icon": "$(italic)"
       },
       {
         "command": "fileTag.deleteView",
-        "title": "File Tag: Delete View",
+        "title": "Delete",
         "icon": "$(trash)"
       },
       {
         "command": "fileTag.renameTag",
-        "title": "File Tag: Rename Tag",
+        "title": "Rename",
         "icon": "$(italic)"
       },
       {
         "command": "fileTag.previewTag",
-        "title": "Preview Tag"
+        "title": "Preview"
       },
       {
         "command": "fileTag.addToTag",
-        "title": "File Tag: Add Pattern to Tag",
+        "title": "Add Pattern",
         "icon": "$(add)"
       },
       {
         "command": "fileTag.deleteTag",
-        "title": "File Tag: Delete Tag",
+        "title": "Delete",
         "icon": "$(trash)"
       },
       {
         "command": "fileTag.deletePattern",
-        "title": "File Tag: Delete Pattern",
+        "title": "Delete Pattern",
         "icon": "$(trash)"
       },
       {
@@ -206,42 +206,42 @@
         {
           "command": "fileTag.previewTag",
           "when": "view == fileTagView && viewItem == fileTagTag",
-          "group": "1_preview"
+          "group": "1_actions@1"
         },
         {
           "command": "fileTag.addToTag",
           "when": "view == fileTagView && viewItem == fileTagTag",
-          "group": "inline@1"
+          "group": "1_actions@2"
         },
         {
           "command": "fileTag.renameTag",
           "when": "view == fileTagView && viewItem == fileTagTag",
-          "group": "inline@2"
+          "group": "1_actions@3"
         },
         {
           "command": "fileTag.deleteTag",
           "when": "view == fileTagView && viewItem == fileTagTag",
-          "group": "inline@3"
+          "group": "1_actions@4"
         },
         {
           "command": "fileTag.deletePattern",
           "when": "view == fileTagView && viewItem == fileTagPattern",
-          "group": "inline"
+          "group": "1_actions"
         },
         {
           "command": "fileTag.editView",
           "when": "view == fileTagView && viewItem == fileTagViewListItem",
-          "group": "inline@1"
+          "group": "1_actions@1"
         },
         {
           "command": "fileTag.renameView",
           "when": "view == fileTagView && viewItem == fileTagViewListItem",
-          "group": "inline@2"
+          "group": "1_actions@2"
         },
         {
           "command": "fileTag.deleteView",
           "when": "view == fileTagView && viewItem == fileTagViewListItem",
-          "group": "inline@3"
+          "group": "1_actions@3"
         },
         {
           "command": "fileTag.openToSide",
