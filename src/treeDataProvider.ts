@@ -219,7 +219,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   getChildren(node?: TreeNode): TreeNode[] {
     if (!node) {
       if (this.currentViewName) return this.rootNodes;
-      return [CATEGORY_VIEWS, CATEGORY_TAGS];
+      return [CATEGORY_TAGS, CATEGORY_VIEWS];
     }
 
     switch (node.kind) {
