@@ -183,12 +183,12 @@
         },
         {
           "command": "fileTag.openConfig",
-          "when": "view == fileTagView",
+          "when": "view == fileTagView && fileTag.selectingView",
           "group": "navigation@4"
         },
         {
           "command": "fileTag.refreshView",
-          "when": "view == fileTagView",
+          "when": "view == fileTagView && fileTag.selectingView",
           "group": "navigation@5"
         }
       ],
