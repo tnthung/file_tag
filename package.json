@@ -91,6 +91,10 @@
         "icon": "$(italic)"
       },
       {
+        "command": "fileTag.previewTag",
+        "title": "Preview Tag"
+      },
+      {
         "command": "fileTag.addToTag",
         "title": "File Tag: Add Pattern to Tag",
         "icon": "$(add)"
@@ -198,6 +202,11 @@
           "command": "fileTag.createTag",
           "when": "view == fileTagView && viewItem == fileTagCategoryTags",
           "group": "inline"
+        },
+        {
+          "command": "fileTag.previewTag",
+          "when": "view == fileTagView && viewItem == fileTagTag",
+          "group": "1_preview"
         },
         {
           "command": "fileTag.addToTag",

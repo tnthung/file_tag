@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { resolveTag } from "./resolver";
 import { ConfigManager } from "./config";
 import { evaluateCondition } from "./evaluator";
 
@@ -110,6 +111,8 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private currentViewName: string | undefined;
+  private previewState: { name: string; patterns: string[] } | undefined;
+  private showingFiles = false;
   private rootNodes: TreeNode[] = [];
 
   // Selection-mode data
@@ -127,7 +130,19 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   async clearView(): Promise<void> {
     this.currentViewName = undefined;
+    this.previewState = undefined;
+    this.showingFiles = false;
     await this.loadViews();
+  }
+
+  async showTagPreview(name: string, patterns: string[]): Promise<void> {
+    this.currentViewName = undefined;
+    this.previewState = { name, patterns };
+    this.showingFiles = true;
+    vscode.commands.executeCommand("setContext", "fileTag.selectingView", false);
+    const uris = await resolveTag(patterns, this.workspaceFolder);
+    this.rootNodes = buildTreeFromParts(uris, this.workspaceFolder);
+    this._onDidChangeTreeData.fire();
   }
 
   async loadViews(): Promise<void> {
@@ -150,6 +165,8 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   async selectView(viewName: string): Promise<void> {
     this.currentViewName = viewName;
+    this.previewState = undefined;
+    this.showingFiles = true;
     vscode.commands.executeCommand("setContext", "fileTag.selectingView", false);
 
     eval: {
@@ -165,8 +182,9 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   }
 
   async refresh(): Promise<void> {
-    if (!this.currentViewName) return this.loadViews();
-    return this.selectView(this.currentViewName);
+    if (this.currentViewName) return this.selectView(this.currentViewName);
+    if (this.previewState) return this.showTagPreview(this.previewState.name, this.previewState.patterns);
+    return this.loadViews();
   }
 
   // --- TreeDataProvider ---
@@ -218,7 +236,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   getChildren(node?: TreeNode): TreeNode[] {
     if (!node) {
-      if (this.currentViewName) return this.rootNodes;
+      if (this.showingFiles) return this.rootNodes;
       return [CATEGORY_TAGS, CATEGORY_VIEWS];
     }
 

@@ -340,6 +340,14 @@ export function registerCommands(
       await configManager.write(config);
     }),
 
+    vscode.commands.registerCommand("fileTag.previewTag", async (node: TagNode) => {
+      if (!node || node.kind !== "tag") return;
+      const config = await configManager.read();
+      const patterns = config.tags[node.name] ?? [];
+      await treeDataProvider.showTagPreview(node.name, patterns);
+      treeView.title = `${node.name} (preview)`;
+    }),
+
     vscode.commands.registerCommand("fileTag.deleteTag", async (node: TagNode) => {
       const answer = await vscode.window.showWarningMessage(
         `Delete tag "${node.name}"?`,
