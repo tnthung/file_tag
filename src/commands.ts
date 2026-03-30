@@ -80,6 +80,7 @@ export function registerCommands(
 
       await treeDataProvider.selectView(picked);
       treeView.description = picked;
+      context.workspaceState.update("fileTag.lastView", picked);
     }),
 
     vscode.commands.registerCommand("fileTag.searchInView", async () => {

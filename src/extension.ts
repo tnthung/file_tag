@@ -26,6 +26,14 @@ export function activate(context: vscode.ExtensionContext): void {
     { dispose: () => treeDataProvider.dispose() });
 
   configManager.ensureExists();
+
+  // Restore the last selected view from the previous session
+  const lastView = context.workspaceState.get<string>("fileTag.lastView");
+  if (lastView) {
+    treeDataProvider.selectView(lastView).then(() => {
+      treeView.description = lastView;
+    });
+  }
 }
 
 
