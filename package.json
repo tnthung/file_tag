@@ -9,9 +9,6 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onView:fileTagView"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -27,7 +24,8 @@
       "fileTagContainer": [
         {
           "id": "fileTagView",
-          "name": "File Tag"
+          "name": "File Tag",
+          "icon": "media/tag.svg"
         }
       ]
     },
