@@ -386,7 +386,10 @@ export function registerCommands(
     }),
 
     vscode.commands.registerCommand("fileTag.refreshView", async () => {
-      await treeDataProvider.refresh();
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Window, title: "File Tag: Refreshing..." },
+        () => treeDataProvider.refresh());
+      vscode.window.setStatusBarMessage("$(check) File Tag refreshed", 2000);
     }),
 
     vscode.commands.registerCommand("fileTag.collapseAll", () => {
