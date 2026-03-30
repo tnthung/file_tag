@@ -4,6 +4,7 @@
   "description": "Tag files with glob patterns and create filtered views with logical conditions",
   "version": "0.0.1",
   "publisher": "tnthung",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/TNThung/file_tag"
