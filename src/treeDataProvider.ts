@@ -104,7 +104,7 @@ function sortNodes(nodes: TreeNode[]): TreeNode[] {
 // --- Provider ---
 
 const CATEGORY_VIEWS: CategoryNode = { kind: "category", label: "Views" };
-const CATEGORY_TAGS: CategoryNode  = { kind: "category", label: "Tags"  };
+export const CATEGORY_TAGS: CategoryNode  = { kind: "category", label: "Tags"  };
 
 export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();

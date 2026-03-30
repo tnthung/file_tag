@@ -10,6 +10,7 @@ import {
   TagNode,
   TagPatternNode,
   ViewListNode,
+  CATEGORY_TAGS,
 } from "./treeDataProvider";
 
 
@@ -98,9 +99,21 @@ export function registerCommands(
       });
       if (!name) return;
 
-      config.tags[name.trim()] = [];
+      const activeUri = vscode.window.activeTextEditor?.document.uri;
+      const defaultValue = activeUri
+        ? WORKSPACE_FOLDER_PREFIX + vscode.workspace.asRelativePath(activeUri, false)
+        : WORKSPACE_FOLDER_PREFIX;
+
+      const pattern = await vscode.window.showInputBox({
+        prompt: `Add first pattern to "${name.trim()}" (optional, press Escape or leave empty to skip)`,
+        value: defaultValue,
+        valueSelection: [defaultValue.length, defaultValue.length],
+      });
+
+      const tag = name.trim();
+      config.tags[tag] = pattern?.trim() ? [pattern.trim()] : [];
       await configManager.write(config);
-      vscode.window.showInformationMessage(`Tag "${name.trim()}" created.`);
+      treeView.reveal(CATEGORY_TAGS, { expand: true });
     }),
 
     vscode.commands.registerCommand("fileTag.addToTag", async (node: TagNode) => {
