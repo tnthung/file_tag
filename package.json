@@ -94,7 +94,7 @@
         },
         {
           "command": "fileTag.searchInView",
-          "when": "view == fileTagView",
+          "when": "view == fileTagView && !fileTag.selectingView",
           "group": "navigation@3"
         },
         {
