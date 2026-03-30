@@ -12,58 +12,57 @@ import {
 
 type UriSet = Set<string>;
 
+// Promise-based cache: ensures concurrent requests for the same tag share
+// a single findFiles call instead of issuing duplicates.
+type UriCache = Map<string, Promise<UriSet>>;
+
 
 function union(a: UriSet, b: UriSet): UriSet {
   const result = new Set(a);
-  for (const item of b)
-    result.add(item);
+  for (const item of b) result.add(item);
   return result;
 }
 
 
 function intersect(a: UriSet, b: UriSet): UriSet {
   const result = new Set<string>();
-  for (const item of a)
-    if (b.has(item))
-      result.add(item);
+  for (const item of a) if (b.has(item)) result.add(item);
   return result;
 }
 
 
 function difference(a: UriSet, b: UriSet): UriSet {
   const result = new Set<string>();
-  for (const item of a)
-    if (!b.has(item))
-      result.add(item);
+  for (const item of a) if (!b.has(item)) result.add(item);
   return result;
 }
 
 
-function toUriSet(uris: vscode.Uri[]): UriSet {
+function toUriSet(uris: readonly vscode.Uri[]): UriSet {
   return new Set(uris.map(u => u.toString()));
 }
 
 
-async function resolveTagCached(
+function isNotCondition(c: ViewCondition): c is { not: ViewCondition } {
+  return typeof c === "object" && !Array.isArray(c) && "not" in c;
+}
+
+
+function resolveTagCached(
   tagName: string,
   config: FileTagConfig,
   workspaceFolder: vscode.WorkspaceFolder,
-  cache: Map<string, UriSet>,
+  cache: UriCache,
 ): Promise<UriSet> {
-  const cached = cache.get(tagName);
-  if (cached) return cached;
-
-  const patterns = config.tags[tagName];
-  if (!patterns) {
-    const empty = new Set<string>();
-    cache.set(tagName, empty);
-    return empty;
+  if (!cache.has(tagName)) {
+    const promise = (async (): Promise<UriSet> => {
+      const patterns = config.tags[tagName];
+      if (!patterns) return new Set();
+      return toUriSet(await resolveTag(patterns, workspaceFolder));
+    })();
+    cache.set(tagName, promise);
   }
-
-  const uris = await resolveTag(patterns, workspaceFolder);
-  const set = toUriSet(uris);
-  cache.set(tagName, set);
-  return set;
+  return cache.get(tagName)!;
 }
 
 
@@ -71,51 +70,52 @@ async function evaluateInner(
   condition: ViewCondition,
   config: FileTagConfig,
   workspaceFolder: vscode.WorkspaceFolder,
-  cache: Map<string, UriSet>,
+  cache: UriCache,
 ): Promise<UriSet> {
   if (typeof condition === "string")
     return resolveTagCached(condition, config, workspaceFolder, cache);
 
-
   if (Array.isArray(condition)) {
-    let result = new Set<string>();
-
-    for (const tagName of condition) {
-      const set = await evaluateInner(tagName, config, workspaceFolder, cache);
-      result = union(result, set);
-    }
-
-    return result;
+    const sets = await Promise.all(
+      condition.map(t => resolveTagCached(t, config, workspaceFolder, cache)));
+    return sets.reduce(union, new Set<string>());
   }
 
   if ("or" in condition) {
-    let result = new Set<string>();
+    const sets = await Promise.all(
+      condition.or.map(c => evaluateInner(c, config, workspaceFolder, cache)));
+    return sets.reduce(union, new Set<string>());
+  }
 
-    for (const child of condition.or) {
-      const set = await evaluateInner(child, config, workspaceFolder, cache);
-      result = union(result, set);
-    }
+  if ("and" in condition) {
+    // Separate positive conditions from {not} conditions so we never need
+    // the universal set — negatives become simple set-differences on the
+    // already-computed positive result.
+    const positives = condition.and.filter(c => !isNotCondition(c));
+    const notInners = condition.and.filter(isNotCondition).map(c => c.not);
+
+    const [posSets, negSets] = await Promise.all([
+      Promise.all(positives.map(c => evaluateInner(c, config, workspaceFolder, cache))),
+      Promise.all(notInners.map(c => evaluateInner(c, config, workspaceFolder, cache))),
+    ]);
+
+    let result: UriSet = posSets.length > 0
+      ? posSets.reduce(intersect)
+      : new Set();
+
+    for (const neg of negSets)
+      result = difference(result, neg);
 
     return result;
   }
 
-  if ("and" in condition) {
-    let result: UriSet | undefined;
-
-    for (const child of condition.and) {
-      const set = await evaluateInner(child, config, workspaceFolder, cache);
-      result = result === undefined ? set : intersect(result, set);
-    }
-
-    return result ?? new Set();
-  }
-
   if ("not" in condition) {
-    const excludeSet = await evaluateInner(condition.not, config, workspaceFolder, cache);
-    const allFiles = await vscode.workspace.findFiles(
-      new vscode.RelativePattern(workspaceFolder, "**/*"));
-    const universalSet = toUriSet(allFiles);
-    return difference(universalSet, excludeSet);
+    // Bare {not} without an enclosing {and}: unavoidable universe query.
+    const [excludeSet, allFiles] = await Promise.all([
+      evaluateInner(condition.not, config, workspaceFolder, cache),
+      vscode.workspace.findFiles(new vscode.RelativePattern(workspaceFolder, "**/*")),
+    ]);
+    return difference(toUriSet(allFiles), excludeSet);
   }
 
   return new Set();
@@ -127,7 +127,7 @@ export async function evaluateCondition(
   config: FileTagConfig,
   workspaceFolder: vscode.WorkspaceFolder,
 ): Promise<vscode.Uri[]> {
-  const cache = new Map<string, UriSet>();
+  const cache: UriCache = new Map();
   const resultSet = await evaluateInner(condition, config, workspaceFolder, cache);
   return Array.from(resultSet).map(s => vscode.Uri.parse(s));
 }
@@ -161,49 +161,31 @@ function extractGlobsInner(condition: ViewCondition, config: FileTagConfig): Glo
 
   if ("or" in condition) {
     const include: string[] = [];
-
     let complex = false;
     for (const child of condition.or) {
       const sub = extractGlobsInner(child, config);
-      if (sub.complex || sub.exclude.length > 0) {
-        complex = true;
-        break;
-      }
-
+      if (sub.complex || sub.exclude.length > 0) { complex = true; break; }
       include.push(...sub.include);
     }
-
     return complex ? { include: [], exclude: [], complex: true } : { include, exclude: [], complex: false };
   }
 
   if ("and" in condition) {
-    // Special case: positive parts AND NOT parts
     const positiveIncludes: string[] = [];
     const negativeExcludes: string[] = [];
     let complex = false;
-
     for (const child of condition.and) {
-      if (typeof child === "object" && !Array.isArray(child) && "not" in child) {
+      if (isNotCondition(child)) {
         const notInner = extractGlobsInner(child.not, config);
-        if (notInner.complex || notInner.exclude.length > 0) {
-          complex = true;
-          break;
-        }
-
+        if (notInner.complex || notInner.exclude.length > 0) { complex = true; break; }
         negativeExcludes.push(...notInner.include);
         continue;
       }
-
       const sub = extractGlobsInner(child, config);
-      if (sub.complex) {
-        complex = true;
-        break;
-      }
-
+      if (sub.complex) { complex = true; break; }
       positiveIncludes.push(...sub.include);
       negativeExcludes.push(...sub.exclude);
     }
-
     return complex
       ? { include: [], exclude: [], complex: true }
       : { include: positiveIncludes, exclude: negativeExcludes, complex: false };
@@ -235,30 +217,23 @@ export async function extractGlobs(
 
   // Fallback: resolve URIs and convert to relative paths
   const uris = await evaluateCondition(condition, config, workspaceFolder);
-  const paths = uris.map((uri) => vscode.workspace.asRelativePath(uri, false));
+  const paths = uris.map(uri => vscode.workspace.asRelativePath(uri, false));
   const joined = paths.join(", ");
 
   if (joined.length > 10000) {
-    // Compress by grouping into directory globs
     const dirCounts = new Map<string, number>();
     for (const p of paths) {
       const dir = p.includes("/") ? p.substring(0, p.lastIndexOf("/")) : ".";
       dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
     }
-
     const compressed: string[] = [];
     const coveredDirs = new Set<string>();
     for (const [dir, count] of dirCounts)
-      if (count >= 5) {
-        compressed.push(`${dir}/**`);
-        coveredDirs.add(dir);
-      }
-
+      if (count >= 5) { compressed.push(`${dir}/**`); coveredDirs.add(dir); }
     for (const p of paths) {
       const dir = p.includes("/") ? p.substring(0, p.lastIndexOf("/")) : ".";
       if (!coveredDirs.has(dir)) compressed.push(p);
     }
-
     return { include: compressed.join(", "), exclude: "" };
   }
 

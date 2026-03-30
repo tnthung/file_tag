@@ -17,7 +17,6 @@ function parsePattern(
   pattern: string,
   workspaceFolder: vscode.WorkspaceFolder,
 ): { base: vscode.Uri; glob: string } {
-
   // ${workspaceFolder}/...
   const wsMatch = pattern.match(/^\$\{workspaceFolder(?::([^}]+))?\}\/(.*)$/);
   if (wsMatch) {
@@ -49,18 +48,40 @@ function parsePattern(
 }
 
 
+// Returns true if a glob's last segment looks like a plain directory name
+// (no glob characters, no file extension). Such patterns are also searched
+// with "/**" appended so that directory contents are included.
+// e.g. "**/node_modules" -> also search "**/node_modules/**"
+function looksLikeDirectory(glob: string): boolean {
+  const last = glob.split("/").pop() ?? "";
+  return last.length > 0
+    && !last.includes("*")
+    && !last.includes("?")
+    && !last.includes("{")
+    && !last.includes(".");
+}
+
+
 export async function resolveTag(
   patterns: string[],
   workspaceFolder: vscode.WorkspaceFolder,
 ): Promise<vscode.Uri[]> {
   const seen = new Map<string, vscode.Uri>();
 
-  for (const pattern of patterns) {
+  const allUris = await Promise.all(patterns.map(async pattern => {
     const { base, glob } = parsePattern(pattern, workspaceFolder);
-    const relativePattern = new vscode.RelativePattern(base, glob);
-    for (const uri of await vscode.workspace.findFiles(relativePattern))
+    const searches = [
+      Promise.resolve(vscode.workspace.findFiles(new vscode.RelativePattern(base, glob))),
+    ];
+    // If the last segment looks like a directory, also search inside it
+    if (looksLikeDirectory(glob))
+      searches.push(Promise.resolve(vscode.workspace.findFiles(new vscode.RelativePattern(base, glob + "/**"))));
+    return (await Promise.all(searches)).flat();
+  }));
+
+  for (const uris of allUris)
+    for (const uri of uris)
       seen.set(uri.toString(), uri);
-  }
 
   return Array.from(seen.values());
 }

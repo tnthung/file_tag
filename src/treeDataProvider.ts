@@ -41,7 +41,11 @@ export interface TagPatternNode {
   parent: TagNode;
 }
 
-export type TreeNode = FileNode | DirNode | ViewListNode | CategoryNode | TagNode | TagPatternNode;
+export interface LoadingNode {
+  kind: "loading";
+}
+
+export type TreeNode = FileNode | DirNode | ViewListNode | CategoryNode | TagNode | TagPatternNode | LoadingNode;
 
 
 // --- Tree building helpers ---
@@ -90,6 +94,7 @@ function buildTreeFromParts(uris: vscode.Uri[], workspaceFolder: vscode.Workspac
 function nodeName(n: TreeNode): string {
   if (n.kind === "category") return n.label;
   if (n.kind === "tagPattern") return n.pattern;
+  if (n.kind === "loading") return "";
   return n.name;
 }
 
@@ -105,6 +110,7 @@ function sortNodes(nodes: TreeNode[]): TreeNode[] {
 
 const CATEGORY_VIEWS: CategoryNode = { kind: "category", label: "Views" };
 export const CATEGORY_TAGS: CategoryNode  = { kind: "category", label: "Tags"  };
+const LOADING_NODE: LoadingNode = { kind: "loading" };
 
 export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
@@ -113,6 +119,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   private currentViewName: string | undefined;
   private previewState: { name: string; patterns: string[] } | undefined;
   private showingFiles = false;
+  private loading = false;
   private rootNodes: TreeNode[] = [];
 
   // Selection-mode data
@@ -139,10 +146,16 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     this.currentViewName = undefined;
     this.previewState = { name, patterns };
     this.showingFiles = true;
+    this.loading = true;
     vscode.commands.executeCommand("setContext", "fileTag.selectingView", false);
-    const uris = await resolveTag(patterns, this.workspaceFolder);
-    this.rootNodes = buildTreeFromParts(uris, this.workspaceFolder);
     this._onDidChangeTreeData.fire();
+    try {
+      const uris = await resolveTag(patterns, this.workspaceFolder);
+      this.rootNodes = buildTreeFromParts(uris, this.workspaceFolder);
+    } finally {
+      this.loading = false;
+      this._onDidChangeTreeData.fire();
+    }
   }
 
   async loadViews(): Promise<void> {
@@ -167,18 +180,21 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     this.currentViewName = viewName;
     this.previewState = undefined;
     this.showingFiles = true;
+    this.loading = true;
     vscode.commands.executeCommand("setContext", "fileTag.selectingView", false);
-
-    eval: {
+    this._onDidChangeTreeData.fire();
+    try {
       const config = await this.configManager.read();
       const condition = config.views[viewName];
-      if (!condition) { this.rootNodes = []; break eval; }
-
-      const uris = await evaluateCondition(condition, config, this.workspaceFolder);
-      this.rootNodes = buildTreeFromParts(uris, this.workspaceFolder);
+      this.rootNodes = condition
+        ? buildTreeFromParts(
+            await evaluateCondition(condition, config, this.workspaceFolder),
+            this.workspaceFolder)
+        : [];
+    } finally {
+      this.loading = false;
+      this._onDidChangeTreeData.fire();
     }
-
-    this._onDidChangeTreeData.fire();
   }
 
   async refresh(): Promise<void> {
@@ -219,6 +235,11 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
         item.contextValue = "fileTagPattern";
         return item;
       }
+      case "loading": {
+        const item = new vscode.TreeItem("Loading...", vscode.TreeItemCollapsibleState.None);
+        item.iconPath = new vscode.ThemeIcon("loading~spin");
+        return item;
+      }
       case "file": {
         const item = new vscode.TreeItem(node.uri, vscode.TreeItemCollapsibleState.None);
         item.label = node.name;
@@ -239,6 +260,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   getChildren(node?: TreeNode): TreeNode[] {
     if (!node) {
+      if (this.loading) return [LOADING_NODE];
       if (this.showingFiles) return this.rootNodes;
       return [CATEGORY_TAGS, CATEGORY_VIEWS];
     }
@@ -257,6 +279,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   getParent(node: TreeNode): TreeNode | undefined {
     // Selection mode parents
+    if (node.kind === "loading")  return undefined;
     if (node.kind === "category") return undefined;
     if (node.kind === "viewList") return CATEGORY_VIEWS;
     if (node.kind === "tag") return CATEGORY_TAGS;
