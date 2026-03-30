@@ -133,7 +133,7 @@
       "view/title": [
         {
           "command": "fileTag.selectView",
-          "when": "view == fileTagView",
+          "when": "view == fileTagView && !fileTag.selectingView",
           "group": "navigation@1"
         },
         {
