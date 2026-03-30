@@ -113,6 +113,40 @@ export function registerCommands(
       await vscode.window.showTextDocument(doc);
     }),
 
+    vscode.commands.registerCommand("fileTag.newView", async () => {
+      const config = await configManager.read();
+      const tagNames = Object.keys(config.tags);
+      if (tagNames.length === 0) {
+        vscode.window.showWarningMessage("No tags defined. Create some tags first.");
+        return;
+      }
+
+      const selected = await vscode.window.showQuickPick(
+        tagNames.map(name => ({ label: name })),
+        { canPickMany: true, placeHolder: "Select tags to include (union)" },
+      );
+      if (!selected || selected.length === 0) return;
+
+      const viewName = await vscode.window.showInputBox({
+        prompt: "Enter view name",
+        validateInput: (value) => {
+          if (!value.trim()) return "View name cannot be empty";
+          if (config.views[value.trim()]) return `View "${value.trim()}" already exists`;
+          return undefined;
+        },
+      });
+      if (!viewName) return;
+
+      const name = viewName.trim();
+      const condition = selected.length === 1
+        ? selected[0].label
+        : selected.map(s => s.label);
+
+      config.views[name] = condition;
+      await configManager.write(config);
+      await vscode.commands.executeCommand("fileTag.openView", name);
+    }),
+
     vscode.commands.registerCommand("fileTag.refreshView", async () => {
       await treeDataProvider.refresh();
     }),

@@ -61,6 +61,11 @@
         "icon": "$(search)"
       },
       {
+        "command": "fileTag.newView",
+        "title": "File Tag: New View from Tags",
+        "icon": "$(add)"
+      },
+      {
         "command": "fileTag.openConfig",
         "title": "File Tag: Open Config",
         "icon": "$(gear)"
@@ -83,19 +88,24 @@
           "group": "navigation@1"
         },
         {
-          "command": "fileTag.searchInView",
-          "when": "view == fileTagView",
+          "command": "fileTag.newView",
+          "when": "view == fileTagView && fileTag.selectingView",
           "group": "navigation@2"
         },
         {
-          "command": "fileTag.refreshView",
+          "command": "fileTag.searchInView",
           "when": "view == fileTagView",
           "group": "navigation@3"
         },
         {
-          "command": "fileTag.openConfig",
+          "command": "fileTag.refreshView",
           "when": "view == fileTagView",
           "group": "navigation@4"
+        },
+        {
+          "command": "fileTag.openConfig",
+          "when": "view == fileTagView",
+          "group": "navigation@5"
         }
       ]
     }

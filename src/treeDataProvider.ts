@@ -108,11 +108,13 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   async loadViews(): Promise<void> {
     const config = await this.configManager.read();
     this.availableViews = Object.keys(config.views);
+    vscode.commands.executeCommand("setContext", "fileTag.selectingView", true);
     this._onDidChangeTreeData.fire();
   }
 
   async selectView(viewName: string): Promise<void> {
     this.currentViewName = viewName;
+    vscode.commands.executeCommand("setContext", "fileTag.selectingView", false);
 
     eval: {
       const config = await this.configManager.read();
