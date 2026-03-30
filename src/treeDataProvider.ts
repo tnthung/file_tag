@@ -17,7 +17,12 @@ export interface DirNode {
   children: TreeNode[];
 }
 
-export type TreeNode = FileNode | DirNode;
+export interface ViewListNode {
+  kind: "viewList";
+  name: string;
+}
+
+export type TreeNode = FileNode | DirNode | ViewListNode;
 
 
 function insertUri(
@@ -71,7 +76,6 @@ function buildTreeFromParts(
 
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
   return nodes.sort((a, b) => {
-    // Directories before files
     if (a.kind !== b.kind)
       return a.kind === "dir" ? -1 : 1;
     return a.name.localeCompare(b.name);
@@ -85,6 +89,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   private currentViewName: string | undefined;
   private rootNodes: TreeNode[] = [];
+  private availableViews: string[] = [];
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -93,6 +98,17 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   getCurrentViewName(): string | undefined {
     return this.currentViewName;
+  }
+
+  async clearView(): Promise<void> {
+    this.currentViewName = undefined;
+    await this.loadViews();
+  }
+
+  async loadViews(): Promise<void> {
+    const config = await this.configManager.read();
+    this.availableViews = Object.keys(config.views);
+    this._onDidChangeTreeData.fire();
   }
 
   async selectView(viewName: string): Promise<void> {
@@ -111,11 +127,24 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   }
 
   async refresh(): Promise<void> {
-    if (this.currentViewName)
-      await this.selectView(this.currentViewName);
+    if (!this.currentViewName)
+      return await this.loadViews();
+    await this.selectView(this.currentViewName);
   }
 
   getTreeItem(node: TreeNode): vscode.TreeItem {
+    if (node.kind === "viewList") {
+      const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = new vscode.ThemeIcon("eye");
+      item.contextValue = "fileTagViewListItem";
+      item.command = {
+        command: "fileTag.openView",
+        title: "Open View",
+        arguments: [node.name],
+      };
+      return item;
+    }
+
     if (node.kind === "file") {
       const item = new vscode.TreeItem(node.uri, vscode.TreeItemCollapsibleState.None);
       item.label = node.name;
@@ -138,7 +167,11 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   }
 
   getChildren(node?: TreeNode): TreeNode[] {
-    if (!node) return this.rootNodes;
+    if (!node) {
+      if (this.currentViewName) return this.rootNodes;
+      return this.availableViews.map(name => ({ kind: "viewList", name }));
+    }
+
     if (node.kind === "dir") return node.children;
     return [];
   }

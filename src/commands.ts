@@ -4,7 +4,9 @@ import { ConfigManager } from "./config";
 import { FileTagTreeDataProvider, TreeNode } from "./treeDataProvider";
 
 
+const LAST_VIEW_KEY = "fileTag.lastView";
 const WORKSPACE_FOLDER_PREFIX = "{WORKSPACE_FOLDER}/";
+
 
 
 export function registerCommands(
@@ -65,22 +67,17 @@ export function registerCommands(
         `Added pattern to "${targetTag}".`);
     }),
 
+    // Shared: activate a view by name (used by tree item click and QuickPick)
+    vscode.commands.registerCommand("fileTag.openView", async (viewName: string) => {
+      await treeDataProvider.selectView(viewName);
+      treeView.title = viewName;
+      context.workspaceState.update(LAST_VIEW_KEY, viewName);
+    }),
+
     vscode.commands.registerCommand("fileTag.selectView", async () => {
-      const config = await configManager.read();
-      const viewNames = Object.keys(config.views);
-      if (viewNames.length === 0) {
-        vscode.window.showInformationMessage(
-          "No views defined. Add views in the config file.");
-        return;
-      }
-
-      const picked = await vscode.window.showQuickPick(viewNames,
-        { placeHolder: "Select a view" });
-      if (!picked) return;
-
-      await treeDataProvider.selectView(picked);
-      treeView.description = picked;
-      context.workspaceState.update("fileTag.lastView", picked);
+      await treeDataProvider.clearView();
+      treeView.title = "File Tag";
+      context.workspaceState.update(LAST_VIEW_KEY, undefined);
     }),
 
     vscode.commands.registerCommand("fileTag.searchInView", async () => {
@@ -118,6 +115,11 @@ export function registerCommands(
 
     vscode.commands.registerCommand("fileTag.refreshView", async () => {
       await treeDataProvider.refresh();
+    }),
+
+    vscode.commands.registerCommand("fileTag.clearLastView", async () => {
+      await context.workspaceState.update(LAST_VIEW_KEY, undefined);
+      vscode.window.showInformationMessage("Last view cleared. Reload the window to see the view list.");
     }),
   );
 }

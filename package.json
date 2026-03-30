@@ -34,10 +34,14 @@
     "viewsWelcome": [
       {
         "view": "fileTagView",
-        "contents": "No view selected.\n[Select a View](command:fileTag.selectView)\n[Open Config](command:fileTag.openConfig)"
+        "contents": "No views defined yet.\n[Open Config](command:fileTag.openConfig)"
       }
     ],
     "commands": [
+      {
+        "command": "fileTag.openView",
+        "title": "File Tag: Open View"
+      },
       {
         "command": "fileTag.createTag",
         "title": "File Tag: Create Tag"
@@ -65,6 +69,10 @@
         "command": "fileTag.refreshView",
         "title": "File Tag: Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "fileTag.clearLastView",
+        "title": "File Tag: Clear Last View (Dev)"
       }
     ],
     "menus": {

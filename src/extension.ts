@@ -27,13 +27,23 @@ export function activate(context: vscode.ExtensionContext): void {
 
   configManager.ensureExists();
 
-  // Restore the last selected view from the previous session
+  // Restore last view if it still exists in config, otherwise show view list
   const lastView = context.workspaceState.get<string>("fileTag.lastView");
-  if (lastView) {
-    treeDataProvider.selectView(lastView).then(() => {
-      treeView.description = lastView;
-    });
+  if (!lastView) {
+    treeDataProvider.loadViews();
+    return;
   }
+
+  configManager.read().then(config => {
+    if (lastView in config.views) {
+      treeDataProvider.selectView(lastView).then(() =>
+        treeView.title = lastView);
+      return;
+    }
+
+    context.workspaceState.update("fileTag.lastView", undefined);
+    treeDataProvider.loadViews();
+  });
 }
 
 
