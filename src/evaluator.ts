@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import {
   resolveTag,
-  stripWorkspacePrefix,
+  stripVariablePrefix,
 } from "./resolver";
 import {
   FileTagConfig,
@@ -144,7 +144,7 @@ interface GlobParts {
 function getTagGlobs(tagName: string, config: FileTagConfig): string[] {
   const patterns = config.tags[tagName];
   if (!patterns) return [];
-  return patterns.map(stripWorkspacePrefix);
+  return patterns.map(stripVariablePrefix);
 }
 
 

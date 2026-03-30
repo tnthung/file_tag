@@ -29,14 +29,14 @@ Config is stored at `.vscode/file-tag.json` and auto-reloads on save.
 {
   "tags": {
     "frontend": [
-      "{WORKSPACE_FOLDER}/src/**/*.tsx",
-      "{WORKSPACE_FOLDER}/src/**/*.css"
+      "${workspaceFolder}/src/**/*.tsx",
+      "${workspaceFolder}/src/**/*.css"
     ],
     "backend": [
-      "{WORKSPACE_FOLDER}/server/**/*.ts"
+      "${workspaceFolder}/server/**/*.ts"
     ],
     "tests": [
-      "{WORKSPACE_FOLDER}/**/*.test.ts"
+      "${workspaceFolder}/**/*.test.ts"
     ]
   },
   "views": {
@@ -49,13 +49,23 @@ Config is stored at `.vscode/file-tag.json` and auto-reloads on save.
 
 ### Glob patterns
 
-Patterns use `{WORKSPACE_FOLDER}/` as a prefix to refer to the workspace root. Standard glob wildcards apply:
+Patterns support VS Code's standard variable syntax as a prefix:
+
+| Variable | Resolves to |
+|----------|-------------|
+| `${workspaceFolder}` | First/only workspace folder |
+| `${workspaceFolder:Name}` | Named workspace folder (multi-root) |
+| `${userHome}` | User home directory |
+| `${env:VAR}` | Environment variable (must be an absolute path) |
+
+Standard glob wildcards apply:
 
 | Pattern | Matches |
 |---------|---------|
-| `{WORKSPACE_FOLDER}/src/**/*.ts` | All `.ts` files under `src/` |
-| `{WORKSPACE_FOLDER}/src/*.ts` | `.ts` files directly in `src/` |
-| `{WORKSPACE_FOLDER}/**/*.{ts,tsx}` | All `.ts` and `.tsx` files |
+| `${workspaceFolder}/src/**/*.ts` | All `.ts` files under `src/` |
+| `${workspaceFolder}/src/*.ts` | `.ts` files directly in `src/` |
+| `${workspaceFolder}/**/*.{ts,tsx}` | All `.ts` and `.tsx` files |
+| `${userHome}/.config/**` | All files under `~/.config/` |
 
 ### View conditions
 

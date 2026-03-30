@@ -15,7 +15,7 @@ import {
 
 
 const LAST_VIEW_KEY = "fileTag.lastView";
-const WORKSPACE_FOLDER_PREFIX = "{WORKSPACE_FOLDER}/";
+const WORKSPACE_FOLDER_PREFIX = "${workspaceFolder}/";
 
 // Internal clipboard for copy/paste file operations
 let copyClipboard: vscode.Uri | undefined;
