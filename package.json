@@ -47,8 +47,8 @@
       },
       {
         "command": "fileTag.selectView",
-        "title": "File Tag: Select View",
-        "icon": "$(filter)"
+        "title": "File Tag: Browse",
+        "icon": "$(notebook-revert)"
       },
       {
         "command": "fileTag.searchInView",
