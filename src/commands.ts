@@ -147,6 +147,26 @@ export function registerCommands(
       await vscode.commands.executeCommand("fileTag.openView", name);
     }),
 
+    vscode.commands.registerCommand("fileTag.deleteView", async (node: TreeNode) => {
+      if (node.kind !== "viewList") return;
+      const answer = await vscode.window.showWarningMessage(
+        `Delete view "${node.name}"?`,
+        { modal: true },
+        "Delete",
+      );
+      if (answer !== "Delete") return;
+
+      const config = await configManager.read();
+      delete config.views[node.name];
+      await configManager.write(config);
+
+      if (treeDataProvider.getCurrentViewName() === node.name) {
+        await treeDataProvider.clearView();
+        treeView.title = "File Tag";
+        context.workspaceState.update(LAST_VIEW_KEY, undefined);
+      }
+    }),
+
     vscode.commands.registerCommand("fileTag.refreshView", async () => {
       await treeDataProvider.refresh();
     }),

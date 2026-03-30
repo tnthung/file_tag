@@ -76,6 +76,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "fileTag.deleteView",
+        "title": "File Tag: Delete View",
+        "icon": "$(trash)"
+      },
+      {
         "command": "fileTag.clearLastView",
         "title": "File Tag: Clear Last View (Dev)"
       }
@@ -106,6 +111,13 @@
           "command": "fileTag.openConfig",
           "when": "view == fileTagView",
           "group": "navigation@5"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "fileTag.deleteView",
+          "when": "view == fileTagView && viewItem == fileTagViewListItem",
+          "group": "inline"
         }
       ]
     }
