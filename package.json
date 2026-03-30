@@ -31,12 +31,6 @@
         }
       ]
     },
-    "viewsWelcome": [
-      {
-        "view": "fileTagView",
-        "contents": "No views defined yet.\n[Open Config](command:fileTag.openConfig)"
-      }
-    ],
     "commands": [
       {
         "command": "fileTag.openView",
