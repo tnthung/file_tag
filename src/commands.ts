@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { extractGlobs } from "./evaluator";
+import { ViewCondition } from "./types";
 import { ConfigManager } from "./config";
 import {
   FileTagTreeDataProvider,
@@ -17,6 +18,15 @@ const WORKSPACE_FOLDER_PREFIX = "{WORKSPACE_FOLDER}/";
 
 // Internal clipboard for copy/paste file operations
 let copyClipboard: vscode.Uri | undefined;
+
+function renameTagInCondition(cond: ViewCondition, oldName: string, newName: string): ViewCondition {
+  if (typeof cond === "string") return cond === oldName ? newName : cond;
+  if (Array.isArray(cond)) return cond.map(t => t === oldName ? newName : t);
+  if ("or"  in cond) return { or:  cond.or.map( c => renameTagInCondition(c, oldName, newName)) };
+  if ("and" in cond) return { and: cond.and.map(c => renameTagInCondition(c, oldName, newName)) };
+  if ("not" in cond) return { not: renameTagInCondition(cond.not, oldName, newName) };
+  return cond;
+}
 
 function nodeUri(node: TreeNode, workspaceFolder: vscode.WorkspaceFolder): vscode.Uri {
   if (node.kind === "file") return node.uri;
@@ -253,6 +263,58 @@ export function registerCommands(
       config.views[node.name] = selected.length === 1
         ? selected[0].label
         : selected.map(s => s.label);
+      await configManager.write(config);
+    }),
+
+    vscode.commands.registerCommand("fileTag.renameView", async (node: ViewListNode) => {
+      const config = await configManager.read();
+      const newName = await vscode.window.showInputBox({
+        prompt: "Rename view",
+        value: node.name,
+        valueSelection: [0, node.name.length],
+        validateInput: v => {
+          if (!v.trim()) return "Name cannot be empty";
+          if (v.trim() !== node.name && config.views[v.trim()]) return `View "${v.trim()}" already exists`;
+          return undefined;
+        },
+      });
+      if (!newName || newName.trim() === node.name) return;
+      const name = newName.trim();
+      config.views[name] = config.views[node.name];
+      delete config.views[node.name];
+      await configManager.write(config);
+
+      // Update active view tracking if the renamed view was active
+      if (treeDataProvider.getCurrentViewName() === node.name) {
+        await treeDataProvider.selectView(name);
+        treeView.title = name;
+        context.workspaceState.update(LAST_VIEW_KEY, name);
+      }
+    }),
+
+    vscode.commands.registerCommand("fileTag.renameTag", async (node: TagNode) => {
+      const config = await configManager.read();
+      const newName = await vscode.window.showInputBox({
+        prompt: "Rename tag",
+        value: node.name,
+        valueSelection: [0, node.name.length],
+        validateInput: v => {
+          if (!v.trim()) return "Name cannot be empty";
+          if (v.trim() !== node.name && config.tags[v.trim()]) return `Tag "${v.trim()}" already exists`;
+          return undefined;
+        },
+      });
+      if (!newName || newName.trim() === node.name) return;
+      const name = newName.trim();
+
+      // Rename in tags
+      config.tags[name] = config.tags[node.name];
+      delete config.tags[node.name];
+
+      // Update all view conditions that reference the old tag name
+      for (const [viewName, condition] of Object.entries(config.views))
+        config.views[viewName] = renameTagInCondition(condition, node.name, name);
+
       await configManager.write(config);
     }),
 

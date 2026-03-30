@@ -73,12 +73,22 @@
       {
         "command": "fileTag.editView",
         "title": "File Tag: Edit View",
-        "icon": "$(edit)"
+        "icon": "$(gear)"
+      },
+      {
+        "command": "fileTag.renameView",
+        "title": "File Tag: Rename View",
+        "icon": "$(italic)"
       },
       {
         "command": "fileTag.deleteView",
         "title": "File Tag: Delete View",
         "icon": "$(trash)"
+      },
+      {
+        "command": "fileTag.renameTag",
+        "title": "File Tag: Rename Tag",
+        "icon": "$(italic)"
       },
       {
         "command": "fileTag.addToTag",
@@ -195,9 +205,14 @@
           "group": "inline@1"
         },
         {
-          "command": "fileTag.deleteTag",
+          "command": "fileTag.renameTag",
           "when": "view == fileTagView && viewItem == fileTagTag",
           "group": "inline@2"
+        },
+        {
+          "command": "fileTag.deleteTag",
+          "when": "view == fileTagView && viewItem == fileTagTag",
+          "group": "inline@3"
         },
         {
           "command": "fileTag.deletePattern",
@@ -210,9 +225,14 @@
           "group": "inline@1"
         },
         {
-          "command": "fileTag.deleteView",
+          "command": "fileTag.renameView",
           "when": "view == fileTagView && viewItem == fileTagViewListItem",
           "group": "inline@2"
+        },
+        {
+          "command": "fileTag.deleteView",
+          "when": "view == fileTagView && viewItem == fileTagViewListItem",
+          "group": "inline@3"
         },
         {
           "command": "fileTag.openToSide",
