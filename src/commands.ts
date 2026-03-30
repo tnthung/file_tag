@@ -198,6 +198,10 @@ export function registerCommands(
       await treeDataProvider.refresh();
     }),
 
+    vscode.commands.registerCommand("fileTag.collapseAll", () => {
+      vscode.commands.executeCommand("workbench.actions.treeView.fileTagView.collapseAll");
+    }),
+
     vscode.commands.registerCommand("fileTag.clearLastView", async () => {
       await context.workspaceState.update(LAST_VIEW_KEY, undefined);
       vscode.window.showInformationMessage("Last view cleared. Reload the window to see the view list.");

@@ -168,6 +168,33 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     return item;
   }
 
+  findFileNode(uri: vscode.Uri): FileNode | undefined {
+    const target = uri.toString();
+    const search = (nodes: TreeNode[]): FileNode | undefined => {
+      for (const node of nodes) {
+        if (node.kind === "file" && node.uri.toString() === target) return node;
+        if (node.kind === "dir") {
+          const found = search(node.children);
+          if (found) return found;
+        }
+      }
+    };
+    return search(this.rootNodes);
+  }
+
+  getParent(node: TreeNode): TreeNode | undefined {
+    const search = (nodes: TreeNode[], parent?: TreeNode): TreeNode | undefined => {
+      for (const child of nodes) {
+        if (child === node) return parent;
+        if (child.kind === "dir") {
+          const found = search(child.children, child);
+          if (found !== undefined) return found;
+        }
+      }
+    };
+    return search(this.rootNodes);
+  }
+
   getChildren(node?: TreeNode): TreeNode[] {
     if (!node) {
       if (this.currentViewName) return this.rootNodes;

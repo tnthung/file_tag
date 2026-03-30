@@ -21,6 +21,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     configManager.setupWatcher(),
     configManager.onDidChange(async () => { await treeDataProvider.refresh(); }),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      if (!editor) return;
+      const node = treeDataProvider.findFileNode(editor.document.uri);
+      if (node) treeView.reveal(node, { select: true, focus: false });
+    }),
     treeView,
     { dispose: () => configManager.dispose() },
     { dispose: () => treeDataProvider.dispose() });

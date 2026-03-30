@@ -75,6 +75,11 @@
         "icon": "$(trash)"
       },
       {
+        "command": "fileTag.collapseAll",
+        "title": "File Tag: Collapse All",
+        "icon": "$(collapse-all)"
+      },
+      {
         "command": "fileTag.clearLastView",
         "title": "File Tag: Clear Last View (Dev)"
       },
@@ -147,9 +152,14 @@
           "group": "navigation@4"
         },
         {
+          "command": "fileTag.collapseAll",
+          "when": "view == fileTagView && !fileTag.selectingView",
+          "group": "navigation@5"
+        },
+        {
           "command": "fileTag.openConfig",
           "when": "view == fileTagView",
-          "group": "navigation@5"
+          "group": "navigation@6"
         }
       ],
       "view/item/context": [
