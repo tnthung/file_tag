@@ -38,7 +38,8 @@
       },
       {
         "command": "fileTag.createTag",
-        "title": "File Tag: Create Tag"
+        "title": "File Tag: Create Tag",
+        "icon": "$(add)"
       },
       {
         "command": "fileTag.addFiles",
@@ -70,8 +71,28 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "fileTag.editView",
+        "title": "File Tag: Edit View",
+        "icon": "$(edit)"
+      },
+      {
         "command": "fileTag.deleteView",
         "title": "File Tag: Delete View",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "fileTag.addToTag",
+        "title": "File Tag: Add Pattern to Tag",
+        "icon": "$(add)"
+      },
+      {
+        "command": "fileTag.deleteTag",
+        "title": "File Tag: Delete Tag",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "fileTag.deletePattern",
+        "title": "File Tag: Delete Pattern",
         "icon": "$(trash)"
       },
       {
@@ -137,11 +158,6 @@
           "group": "navigation@1"
         },
         {
-          "command": "fileTag.newView",
-          "when": "view == fileTagView && fileTag.selectingView",
-          "group": "navigation@2"
-        },
-        {
           "command": "fileTag.searchInView",
           "when": "view == fileTagView && !fileTag.selectingView",
           "group": "navigation@3"
@@ -164,9 +180,39 @@
       ],
       "view/item/context": [
         {
+          "command": "fileTag.newView",
+          "when": "view == fileTagView && viewItem == fileTagCategoryViews",
+          "group": "inline"
+        },
+        {
+          "command": "fileTag.createTag",
+          "when": "view == fileTagView && viewItem == fileTagCategoryTags",
+          "group": "inline"
+        },
+        {
+          "command": "fileTag.addToTag",
+          "when": "view == fileTagView && viewItem == fileTagTag",
+          "group": "inline@1"
+        },
+        {
+          "command": "fileTag.deleteTag",
+          "when": "view == fileTagView && viewItem == fileTagTag",
+          "group": "inline@2"
+        },
+        {
+          "command": "fileTag.deletePattern",
+          "when": "view == fileTagView && viewItem == fileTagPattern",
+          "group": "inline"
+        },
+        {
+          "command": "fileTag.editView",
+          "when": "view == fileTagView && viewItem == fileTagViewListItem",
+          "group": "inline@1"
+        },
+        {
           "command": "fileTag.deleteView",
           "when": "view == fileTagView && viewItem == fileTagViewListItem",
-          "group": "inline"
+          "group": "inline@2"
         },
         {
           "command": "fileTag.openToSide",

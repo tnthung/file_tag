@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
-import * as path from "path";
 import { ConfigManager } from "./config";
 import { evaluateCondition } from "./evaluator";
 
+
+// --- Node types ---
 
 export interface FileNode {
   kind: "file";
@@ -22,8 +23,27 @@ export interface ViewListNode {
   name: string;
 }
 
-export type TreeNode = FileNode | DirNode | ViewListNode;
+export interface CategoryNode {
+  kind: "category";
+  label: "Views" | "Tags";
+}
 
+export interface TagNode {
+  kind: "tag";
+  name: string;
+  patterns: string[];
+}
+
+export interface TagPatternNode {
+  kind: "tagPattern";
+  pattern: string;
+  parent: TagNode;
+}
+
+export type TreeNode = FileNode | DirNode | ViewListNode | CategoryNode | TagNode | TagPatternNode;
+
+
+// --- Tree building helpers ---
 
 function insertUri(
   children: Map<string, TreeNode>,
@@ -51,37 +71,39 @@ function insertUri(
   const dirNode = node as DirNode;
   const childMap = new Map<string, TreeNode>();
   for (const child of dirNode.children)
-    childMap.set(child.name, child);
+    childMap.set(nodeName(child), child);
 
   insertUri(childMap, parts, uri, depth + 1);
   dirNode.children = sortNodes(Array.from(childMap.values()));
 }
 
-
-function buildTreeFromParts(
-  uris: vscode.Uri[],
-  workspaceFolder: vscode.WorkspaceFolder,
-): TreeNode[] {
+function buildTreeFromParts(uris: vscode.Uri[], workspaceFolder: vscode.WorkspaceFolder): TreeNode[] {
   const rootMap = new Map<string, TreeNode>();
-
   for (const uri of uris) {
     const rel = vscode.workspace.asRelativePath(uri, false);
-    const parts = rel.split("/");
-    insertUri(rootMap, parts, uri, 0);
+    insertUri(rootMap, rel.split("/"), uri, 0);
   }
-
   return sortNodes(Array.from(rootMap.values()));
 }
 
+function nodeName(n: TreeNode): string {
+  if (n.kind === "category") return n.label;
+  if (n.kind === "tagPattern") return n.pattern;
+  return n.name;
+}
 
 function sortNodes(nodes: TreeNode[]): TreeNode[] {
   return nodes.sort((a, b) => {
-    if (a.kind !== b.kind)
-      return a.kind === "dir" ? -1 : 1;
-    return a.name.localeCompare(b.name);
+    if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
+    return nodeName(a).localeCompare(nodeName(b));
   });
 }
 
+
+// --- Provider ---
+
+const CATEGORY_VIEWS: CategoryNode = { kind: "category", label: "Views" };
+const CATEGORY_TAGS: CategoryNode  = { kind: "category", label: "Tags"  };
 
 export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
@@ -89,7 +111,10 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   private currentViewName: string | undefined;
   private rootNodes: TreeNode[] = [];
-  private availableViews: string[] = [];
+
+  // Selection-mode data
+  private viewNodes: ViewListNode[] = [];
+  private tagNodes: TagNode[] = [];
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -107,7 +132,18 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   async loadViews(): Promise<void> {
     const config = await this.configManager.read();
-    this.availableViews = Object.keys(config.views);
+
+    this.viewNodes = Object.keys(config.views).map(name => ({
+      kind: "viewList",
+      name,
+    }));
+
+    this.tagNodes = Object.entries(config.tags).map(([name, patterns]) => ({
+      kind: "tag",
+      name,
+      patterns,
+    }));
+
     vscode.commands.executeCommand("setContext", "fileTag.selectingView", true);
     this._onDidChangeTreeData.fire();
   }
@@ -129,43 +165,94 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   }
 
   async refresh(): Promise<void> {
-    if (!this.currentViewName)
-      return await this.loadViews();
-    await this.selectView(this.currentViewName);
+    if (!this.currentViewName) return this.loadViews();
+    return this.selectView(this.currentViewName);
   }
 
+  // --- TreeDataProvider ---
+
   getTreeItem(node: TreeNode): vscode.TreeItem {
-    if (node.kind === "viewList") {
-      const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.None);
-      item.iconPath = new vscode.ThemeIcon("eye");
-      item.contextValue = "fileTagViewListItem";
-      item.command = {
-        command: "fileTag.openView",
-        title: "Open View",
-        arguments: [node.name],
-      };
-      return item;
+    switch (node.kind) {
+      case "category": {
+        const item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.Expanded);
+        item.contextValue = node.label === "Views" ? "fileTagCategoryViews" : "fileTagCategoryTags";
+        return item;
+      }
+      case "viewList": {
+        const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.None);
+        item.iconPath = new vscode.ThemeIcon("eye");
+        item.contextValue = "fileTagViewListItem";
+        item.command = { command: "fileTag.openView", title: "Open View", arguments: [node.name] };
+        return item;
+      }
+      case "tag": {
+        const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.iconPath = new vscode.ThemeIcon("tag");
+        item.description = `${node.patterns.length} pattern${node.patterns.length !== 1 ? "s" : ""}`;
+        item.contextValue = "fileTagTag";
+        return item;
+      }
+      case "tagPattern": {
+        const item = new vscode.TreeItem(node.pattern, vscode.TreeItemCollapsibleState.None);
+        item.iconPath = new vscode.ThemeIcon("symbol-file");
+        item.contextValue = "fileTagPattern";
+        return item;
+      }
+      case "file": {
+        const item = new vscode.TreeItem(node.uri, vscode.TreeItemCollapsibleState.None);
+        item.label = node.name;
+        item.resourceUri = node.uri;
+        item.contextValue = "fileTagFile";
+        item.command = { command: "vscode.open", title: "Open", arguments: [node.uri] };
+        return item;
+      }
+      case "dir": {
+        const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Collapsed);
+        item.resourceUri = vscode.Uri.joinPath(this.workspaceFolder.uri, node.relativePath);
+        item.contextValue = "fileTagDir";
+        item.iconPath = vscode.ThemeIcon.Folder;
+        return item;
+      }
+    }
+  }
+
+  getChildren(node?: TreeNode): TreeNode[] {
+    if (!node) {
+      if (this.currentViewName) return this.rootNodes;
+      return [CATEGORY_VIEWS, CATEGORY_TAGS];
     }
 
-    if (node.kind === "file") {
-      const item = new vscode.TreeItem(node.uri, vscode.TreeItemCollapsibleState.None);
-      item.label = node.name;
-      item.resourceUri = node.uri;
-      item.contextValue = "fileTagFile";
-      item.command = {
-        command: "vscode.open",
-        title: "Open",
-        arguments: [node.uri],
-      };
-      return item;
+    switch (node.kind) {
+      case "category":
+        return node.label === "Views" ? this.viewNodes : this.tagNodes;
+      case "tag":
+        return node.patterns.map(pattern => ({ kind: "tagPattern", pattern, parent: node }));
+      case "dir":
+        return node.children;
+      default:
+        return [];
     }
+  }
 
-    // Directory node
-    const item = new vscode.TreeItem(node.name, vscode.TreeItemCollapsibleState.Collapsed);
-    item.resourceUri = vscode.Uri.joinPath(this.workspaceFolder.uri, node.relativePath);
-    item.contextValue = "fileTagDir";
-    item.iconPath = vscode.ThemeIcon.Folder;
-    return item;
+  getParent(node: TreeNode): TreeNode | undefined {
+    // Selection mode parents
+    if (node.kind === "category") return undefined;
+    if (node.kind === "viewList") return CATEGORY_VIEWS;
+    if (node.kind === "tag") return CATEGORY_TAGS;
+    if (node.kind === "tagPattern") return node.parent;
+
+    // File tree parents
+    const search = (nodes: TreeNode[], parent?: TreeNode): TreeNode | undefined => {
+      for (const child of nodes) {
+        if (child === node) return parent;
+        if (child.kind === "dir") {
+          const found = search(child.children, child);
+          if (found !== undefined) return found;
+        }
+      }
+    };
+
+    return search(this.rootNodes);
   }
 
   findFileNode(uri: vscode.Uri): FileNode | undefined {
@@ -179,30 +266,8 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
         }
       }
     };
+
     return search(this.rootNodes);
-  }
-
-  getParent(node: TreeNode): TreeNode | undefined {
-    const search = (nodes: TreeNode[], parent?: TreeNode): TreeNode | undefined => {
-      for (const child of nodes) {
-        if (child === node) return parent;
-        if (child.kind === "dir") {
-          const found = search(child.children, child);
-          if (found !== undefined) return found;
-        }
-      }
-    };
-    return search(this.rootNodes);
-  }
-
-  getChildren(node?: TreeNode): TreeNode[] {
-    if (!node) {
-      if (this.currentViewName) return this.rootNodes;
-      return this.availableViews.map(name => ({ kind: "viewList", name }));
-    }
-
-    if (node.kind === "dir") return node.children;
-    return [];
   }
 
   dispose(): void {

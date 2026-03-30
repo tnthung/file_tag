@@ -1,7 +1,15 @@
 import * as vscode from "vscode";
 import { extractGlobs } from "./evaluator";
 import { ConfigManager } from "./config";
-import { FileTagTreeDataProvider, TreeNode, DirNode } from "./treeDataProvider";
+import {
+  FileTagTreeDataProvider,
+  TreeNode,
+  DirNode,
+  FileNode,
+  TagNode,
+  TagPatternNode,
+  ViewListNode,
+} from "./treeDataProvider";
 
 
 const LAST_VIEW_KEY = "fileTag.lastView";
@@ -61,6 +69,24 @@ export function registerCommands(
       config.tags[name.trim()] = [];
       await configManager.write(config);
       vscode.window.showInformationMessage(`Tag "${name.trim()}" created.`);
+    }),
+
+    vscode.commands.registerCommand("fileTag.addToTag", async (node: TagNode) => {
+      const activeUri = vscode.window.activeTextEditor?.document.uri;
+      const defaultValue = activeUri
+        ? WORKSPACE_FOLDER_PREFIX + vscode.workspace.asRelativePath(activeUri, false)
+        : WORKSPACE_FOLDER_PREFIX;
+
+      const pattern = await vscode.window.showInputBox({
+        prompt: `Add pattern to "${node.name}"`,
+        value: defaultValue,
+        valueSelection: [defaultValue.length, defaultValue.length],
+      });
+      if (!pattern) return;
+
+      const config = await configManager.read();
+      config.tags[node.name].push(pattern);
+      await configManager.write(config);
     }),
 
     vscode.commands.registerCommand("fileTag.addFiles", async () => {
@@ -194,6 +220,64 @@ export function registerCommands(
       }
     }),
 
+    vscode.commands.registerCommand("fileTag.editView", async (node: ViewListNode) => {
+      const config = await configManager.read();
+      const condition = config.views[node.name];
+      const tagNames = Object.keys(config.tags);
+
+      // Resolve pre-selected tags for simple union conditions only
+      let preSelected: string[] = [];
+      let isSimple = false;
+      if (typeof condition === "string") {
+        preSelected = [condition];
+        isSimple = true;
+      } else if (Array.isArray(condition)) {
+        preSelected = condition;
+        isSimple = true;
+      }
+
+      if (!isSimple) {
+        // Complex condition — fall back to opening config
+        vscode.window.showInformationMessage(
+          `"${node.name}" has a complex condition. Opening config for manual editing.`);
+        await vscode.commands.executeCommand("fileTag.openConfig");
+        return;
+      }
+
+      const selected = await vscode.window.showQuickPick(
+        tagNames.map(name => ({ label: name, picked: preSelected.includes(name) })),
+        { canPickMany: true, placeHolder: `Edit tags for "${node.name}"` },
+      );
+      if (!selected) return;
+
+      config.views[node.name] = selected.length === 1
+        ? selected[0].label
+        : selected.map(s => s.label);
+      await configManager.write(config);
+    }),
+
+    vscode.commands.registerCommand("fileTag.deleteTag", async (node: TagNode) => {
+      const answer = await vscode.window.showWarningMessage(
+        `Delete tag "${node.name}"?`,
+        { modal: true },
+        "Delete",
+      );
+      if (answer !== "Delete") return;
+      const config = await configManager.read();
+      delete config.tags[node.name];
+      await configManager.write(config);
+    }),
+
+    vscode.commands.registerCommand("fileTag.deletePattern", async (node: TagPatternNode) => {
+      const config = await configManager.read();
+      const patterns = config.tags[node.parent.name];
+      if (!patterns) return;
+      const idx = patterns.indexOf(node.pattern);
+      if (idx === -1) return;
+      patterns.splice(idx, 1);
+      await configManager.write(config);
+    }),
+
     vscode.commands.registerCommand("fileTag.refreshView", async () => {
       await treeDataProvider.refresh();
     }),
@@ -274,7 +358,7 @@ export function registerCommands(
       }
     }),
 
-    vscode.commands.registerCommand("fileTag.renameFile", async (node: TreeNode) => {
+    vscode.commands.registerCommand("fileTag.renameFile", async (node: FileNode | DirNode) => {
       const uri = nodeUri(node, workspaceFolder);
       const dot = node.name.lastIndexOf(".");
       const selEnd = node.kind === "file" && dot > 0 ? dot : node.name.length;
@@ -294,7 +378,7 @@ export function registerCommands(
       }
     }),
 
-    vscode.commands.registerCommand("fileTag.deleteFile", async (node: TreeNode) => {
+    vscode.commands.registerCommand("fileTag.deleteFile", async (node: FileNode | DirNode) => {
       const uri = nodeUri(node, workspaceFolder);
       const answer = await vscode.window.showWarningMessage(
         `Delete "${node.name}"?`,
