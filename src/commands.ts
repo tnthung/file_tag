@@ -42,18 +42,16 @@ export function registerCommands(
         return;
       }
 
-      // Pre-fill with currently focused file
-      let defaultValue = "";
+      // Pre-fill with currently focused file, or just the prefix if none
       const activeUri = vscode.window.activeTextEditor?.document.uri;
-      if (activeUri) {
-        const relative = vscode.workspace.asRelativePath(activeUri, false);
-        defaultValue = WORKSPACE_FOLDER_PREFIX + relative;
-      }
+      const defaultValue = activeUri
+        ? WORKSPACE_FOLDER_PREFIX + vscode.workspace.asRelativePath(activeUri, false)
+        : WORKSPACE_FOLDER_PREFIX;
 
       const pattern = await vscode.window.showInputBox({
         prompt: "Enter file pattern (supports wildcards)",
         value: defaultValue,
-        valueSelection: [0, defaultValue.length]
+        valueSelection: [defaultValue.length, defaultValue.length]
       });
       if (!pattern) return;
 
