@@ -138,6 +138,11 @@
         "title": "Open in Integrated Terminal"
       },
       {
+        "command": "fileTag.newFile",
+        "title": "New File",
+        "icon": "$(new-file)"
+      },
+      {
         "command": "fileTag.copyPath",
         "title": "Copy Path"
       },
@@ -260,6 +265,11 @@
           "command": "fileTag.revealInOS",
           "when": "view == fileTagView && (viewItem == fileTagFile || viewItem == fileTagDir)",
           "group": "navigation@3"
+        },
+        {
+          "command": "fileTag.newFile",
+          "when": "view == fileTagView && viewItem == fileTagDir && !fileTag.selectingView",
+          "group": "3_creation@1"
         },
         {
           "command": "fileTag.openInTerminal",

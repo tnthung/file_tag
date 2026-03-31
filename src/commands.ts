@@ -79,6 +79,57 @@ function logCommandInvocation(command: string, node: TreeNode | undefined, treeV
   logTiming("commands", `${command} invoked | argument=${describeNode(node)} selection=[${selection}] totalSelection=${treeView.selection.length}`);
 }
 
+async function pathExists(uri: vscode.Uri): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch (error) {
+    if (error instanceof vscode.FileSystemError && error.code === "FileNotFound")
+      return false;
+    throw error;
+  }
+}
+
+function validatePathSegment(segment: string): string | undefined {
+  if (!segment.trim())
+    return "Names cannot be empty";
+  if (segment === "." || segment === "..")
+    return "Names cannot be '.' or '..'";
+  if (/[<>:"|?*]/.test(segment))
+    return 'Names cannot include <>:"|?* characters';
+  return undefined;
+}
+
+function parseNewEntryInput(value: string): { type: "file" | "folder"; segments: string[] } | { error: string } {
+  const trimmed = value.trim();
+  if (!trimmed)
+    return { error: "Name cannot be empty" };
+
+  const normalized = trimmed.replace(/\\/g, "/");
+  const isFolder = normalized.endsWith("/");
+  const target = isFolder ? normalized.slice(0, -1) : normalized;
+  if (!target)
+    return { error: "Provide at least one folder or file name" };
+
+  const segments = target.split("/").filter(part => part.length > 0);
+  if (segments.length === 0)
+    return { error: "Provide at least one folder or file name" };
+
+  for (const segment of segments) {
+    const validation = validatePathSegment(segment);
+    if (validation) return { error: validation };
+  }
+
+  return { type: isFolder ? "folder" : "file", segments };
+}
+
+function joinPathSegments(base: vscode.Uri, segments: string[]): vscode.Uri {
+  let current = base;
+  for (const segment of segments)
+    current = vscode.Uri.joinPath(current, segment);
+  return current;
+}
+
 function setClipboardItems(uris: vscode.Uri[]): void {
   copyClipboard = uris;
   updateClipboardContext();
@@ -626,6 +677,63 @@ export function registerCommands(
       const uri = node.kind === "file" ? node.uri
         : vscode.Uri.joinPath(workspaceFolder.uri, (node as DirNode).relativePath);
       await vscode.commands.executeCommand("revealFileInOS", uri);
+    }),
+
+    vscode.commands.registerCommand("fileTag.newFile", async (node?: TreeNode) => {
+      logCommandInvocation("fileTag.newFile", node, treeView);
+      const destination = getDirectoryTarget(node, treeView, workspaceFolder);
+      const name = await vscode.window.showInputBox({
+        prompt: "Enter a file path (append / or \\ to create folders)",
+        placeHolder: "folder/subfolder/file.ts or folder\\",
+        validateInput: value => {
+          const result = parseNewEntryInput(value);
+          return "error" in result ? result.error : undefined;
+        },
+      });
+      if (!name) return;
+
+      const parsed = parseNewEntryInput(name);
+      if ("error" in parsed) {
+        vscode.window.showErrorMessage(parsed.error);
+        return;
+      }
+
+      if (parsed.type === "folder") {
+        const folderUri = joinPathSegments(destination, parsed.segments);
+        try {
+          if (await pathExists(folderUri)) {
+            vscode.window.showErrorMessage(`"${name.trim()}" already exists.`);
+            return;
+          }
+          await vscode.workspace.fs.createDirectory(folderUri);
+          await engine.notifyFileCreated("command:newFile:folder", [folderUri]);
+
+        } catch (error) {
+          vscode.window.showErrorMessage(`Create folder failed: ${error instanceof Error ? error.message : error}`);
+        }
+        return;
+      }
+
+      const dirSegments = parsed.segments.slice(0, -1);
+      const fileName = parsed.segments[parsed.segments.length - 1];
+      const parentDir = joinPathSegments(destination, dirSegments);
+      const fileUri = vscode.Uri.joinPath(parentDir, fileName);
+
+      try {
+        if (await pathExists(fileUri)) {
+          vscode.window.showErrorMessage(`"${name.trim()}" already exists.`);
+          return;
+        }
+
+        await vscode.workspace.fs.createDirectory(parentDir);
+        await vscode.workspace.fs.writeFile(fileUri, new Uint8Array());
+        await engine.notifyFileCreated("command:newFile:file", [fileUri]);
+        const doc = await vscode.workspace.openTextDocument(fileUri);
+        await vscode.window.showTextDocument(doc);
+
+      } catch (error) {
+        vscode.window.showErrorMessage(`Create file failed: ${error instanceof Error ? error.message : error}`);
+      }
     }),
 
     vscode.commands.registerCommand("fileTag.openInTerminal", async (node: TreeNode) => {
