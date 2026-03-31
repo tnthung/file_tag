@@ -604,10 +604,6 @@ export function registerCommands(
       vscode.window.setStatusBarMessage("$(check) File Tag refreshed", 2000);
     }),
 
-    vscode.commands.registerCommand("fileTag.collapseAll", () => {
-      vscode.commands.executeCommand("workbench.actions.treeView.fileTagView.collapseAll");
-    }),
-
     vscode.commands.registerCommand("fileTag.clearLastView", async () => {
       await context.workspaceState.update(LAST_VIEW_KEY, undefined);
       vscode.window.showInformationMessage("Last view cleared. Reload the window to see the view list.");

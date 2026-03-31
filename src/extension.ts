@@ -61,7 +61,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await engine.init();
   const treeDataProvider = new FileTagTreeDataProvider(configManager, workspaceFolder, engine);
 
-  const treeView = vscode.window.createTreeView<TreeNode>("fileTagView", { treeDataProvider });
+  const treeView = vscode.window.createTreeView<TreeNode>("fileTagView", {
+    treeDataProvider,
+    canSelectMany: true,
+    showCollapseAll: true,
+  });
+
   registerCommands(context, configManager, treeDataProvider, treeView, workspaceFolder, engine);
 
   let isTreeViewVisible = treeView.visible;
