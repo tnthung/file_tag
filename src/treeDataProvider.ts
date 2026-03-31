@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { ConfigManager } from "./config";
 import { FileTagEngine, ViewEntriesUpdateEvent, ViewRefreshEvent, ViewSnapshot } from "./engine";
@@ -46,6 +47,26 @@ export interface LoadingNode {
 }
 
 export type TreeNode = FileNode | DirNode | ViewListNode | CategoryNode | TagNode | TagPatternNode | LoadingNode;
+
+type DraggedEntry = DraggedFileEntry | DraggedDirEntry;
+
+interface DraggedFileEntry {
+  kind: "file";
+  name: string;
+  relativePath: string;
+  uri: string;
+}
+
+interface DraggedDirEntry {
+  kind: "dir";
+  name: string;
+  relativePath: string;
+}
+
+interface DropDirectory {
+  relativePath: string;
+  uri: vscode.Uri;
+}
 
 
 // --- Tree building helpers ---
@@ -127,7 +148,9 @@ const CATEGORY_VIEWS: CategoryNode = { kind: "category", label: "Views" };
 export const CATEGORY_TAGS: CategoryNode  = { kind: "category", label: "Tags"  };
 const LOADING_NODE: LoadingNode = { kind: "loading" };
 
-export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
+export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode>, vscode.TreeDragAndDropController<TreeNode> {
+  private static readonly DRAG_MIME = "application/vnd.file-tag.tree";
+
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -146,6 +169,8 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   // Selection-mode data
   private viewNodes: ViewListNode[] = [];
   private tagNodes: TagNode[] = [];
+  readonly dragMimeTypes = [FileTagTreeDataProvider.DRAG_MIME];
+  readonly dropMimeTypes = [FileTagTreeDataProvider.DRAG_MIME];
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -321,6 +346,100 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
       removed = true;
     }
     return removed;
+  }
+
+  private collectTrackedFileRenamesForDir(oldDirRelative: string, newDirUri: vscode.Uri): { oldUri: vscode.Uri; newUri: vscode.Uri }[] {
+    const normalizedOld = this.normalizeRelativePath(oldDirRelative);
+    if (!normalizedOld) return [];
+    const prefix = `${normalizedOld}/`;
+    const renames: { oldUri: vscode.Uri; newUri: vscode.Uri }[] = [];
+
+    for (const fileNode of this.fileNodeByUri.values()) {
+      const rel = this.relativePathForUri(fileNode.uri);
+      if (!rel || !rel.startsWith(prefix)) continue;
+      const suffix = rel.slice(prefix.length);
+      const segments = suffix.split("/").filter(segment => segment.length > 0);
+      const newUri = segments.length > 0
+        ? vscode.Uri.joinPath(newDirUri, ...segments)
+        : newDirUri;
+      renames.push({ oldUri: fileNode.uri, newUri });
+    }
+
+    return renames;
+  }
+
+  public expandTrackedRenameEntries(entries: readonly { oldUri: vscode.Uri; newUri: vscode.Uri }[]): { oldUri: vscode.Uri; newUri: vscode.Uri }[] {
+    if (!this.showingFiles) return [];
+    const renames: { oldUri: vscode.Uri; newUri: vscode.Uri }[] = [];
+    const processedDirs = new Set<string>();
+
+    for (const entry of entries) {
+      const key = entry.oldUri.toString();
+      if (this.fileNodeByUri.has(key)) {
+        renames.push(entry);
+        continue;
+      }
+
+      const oldRelative = this.relativePathForUri(entry.oldUri);
+      if (!oldRelative || processedDirs.has(oldRelative)) continue;
+      processedDirs.add(oldRelative);
+
+      renames.push(...this.collectTrackedFileRenamesForDir(oldRelative, entry.newUri));
+    }
+
+    return renames;
+  }
+
+  private relativePathForUri(uri: vscode.Uri): string {
+    const relative = path.relative(this.workspaceFolder.uri.fsPath, uri.fsPath);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
+      return "";
+    return relative.split(path.sep).join("/");
+  }
+
+  private normalizeRelativePath(value: string | undefined): string {
+    if (!value) return "";
+    return value
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+/g, "/")
+      .replace(/\/+$/, "");
+  }
+
+  private parentPath(relative: string): string {
+    const normalized = this.normalizeRelativePath(relative);
+    if (!normalized) return "";
+
+    const idx = normalized.lastIndexOf("/");
+    return idx === -1 ? "" : normalized.slice(0, idx);
+  }
+
+  private toWorkspaceUri(relative: string): vscode.Uri {
+    const normalized = this.normalizeRelativePath(relative);
+    if (!normalized) return this.workspaceFolder.uri;
+
+    const segments = normalized.split("/").filter(Boolean);
+    return vscode.Uri.joinPath(this.workspaceFolder.uri, ...segments);
+  }
+
+  private isSameOrAncestor(base: string, candidate: string): boolean {
+    const a = this.normalizeRelativePath(base);
+    if (!a) return false;
+
+    const b = this.normalizeRelativePath(candidate);
+    return b === a || b.startsWith(`${a}/`);
+  }
+
+  private async pathExists(uri: vscode.Uri): Promise<boolean> {
+    try {
+      await vscode.workspace.fs.stat(uri);
+      return true;
+
+    } catch (error) {
+      if (error instanceof vscode.FileSystemError && error.code === "FileNotFound")
+        return false;
+      throw error;
+    }
   }
 
   private setRootNodes(nodes: TreeNode[]): void {
@@ -556,6 +675,152 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   findFileNode(uri: vscode.Uri): FileNode | undefined {
     return this.fileNodeByUri.get(uri.toString());
+  }
+
+  // --- Drag & Drop ---
+
+  async handleDrag(source: TreeNode[], dataTransfer: vscode.DataTransfer): Promise<void> {
+    if (!this.showingFiles) return;
+
+    const entries: DraggedEntry[] = [];
+    for (const node of source) {
+      if (node.kind === "file") {
+        entries.push({
+          kind: "file",
+          name: node.name,
+          relativePath: this.relativePathForUri(node.uri),
+          uri: node.uri.toString(),
+        });
+      }
+
+      else if (node.kind === "dir") {
+        entries.push({
+          kind: "dir",
+          name: node.name,
+          relativePath: this.normalizeRelativePath(node.relativePath),
+        });
+      }
+    }
+
+    if (entries.length === 0) return;
+    dataTransfer.set(
+      FileTagTreeDataProvider.DRAG_MIME,
+      new vscode.DataTransferItem(JSON.stringify(entries)),
+    );
+  }
+
+  async handleDrop(target: TreeNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
+    if (!this.showingFiles) return;
+
+    const item = dataTransfer.get(FileTagTreeDataProvider.DRAG_MIME);
+    if (!item) return;
+
+    let payload: DraggedEntry[];
+    try {
+      const raw = await item.asString();
+      payload = JSON.parse(raw) as DraggedEntry[];
+
+    } catch {
+      return;
+    }
+
+    if (!Array.isArray(payload) || payload.length === 0) return;
+    const destination = this.resolveDropDirectory(target);
+    if (!destination) return;
+
+    const entries = this.filterDragEntries(payload);
+    if (entries.length === 0) return;
+
+    const renameMap = new Map<string, { oldUri: vscode.Uri; newUri: vscode.Uri }>();
+    const failures: string[] = [];
+
+    for (const entry of entries) {
+      try {
+        const renameList = await this.moveEntry(entry, destination);
+        if (renameList)
+          for (const rename of renameList)
+            renameMap.set(rename.oldUri.toString(), rename);
+
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push(message);
+      }
+    }
+
+    if (renameMap.size > 0) {
+      const payload = Array.from(renameMap.values());
+      await this.engine.notifyFileRenamed("dnd:move", payload);
+      logTiming("treeDnd", `moved ${payload.length} item(s) -> ${destination.relativePath || "."}`);
+    }
+
+    if (failures.length > 0)
+      vscode.window.showErrorMessage(failures.join(" | "));
+  }
+
+  private resolveDropDirectory(target: TreeNode | undefined): DropDirectory | undefined {
+    if (!this.showingFiles) return undefined;
+    if (!target) return { uri: this.workspaceFolder.uri, relativePath: "" };
+
+    if (target.kind === "dir")
+      return { uri: this.toWorkspaceUri(target.relativePath), relativePath: this.normalizeRelativePath(target.relativePath) };
+
+    if (target.kind === "file") {
+      const relative = this.parentPath(this.relativePathForUri(target.uri));
+      return { uri: this.toWorkspaceUri(relative), relativePath: relative };
+    }
+
+    return undefined;
+  }
+
+  private filterDragEntries(entries: DraggedEntry[]): DraggedEntry[] {
+    const normalized = entries.map(entry => ({
+      ...entry,
+      relativePath: this.normalizeRelativePath(entry.relativePath),
+    }));
+
+    const sorted = normalized.sort((a, b) => this.pathDepth(a.relativePath) - this.pathDepth(b.relativePath));
+    const kept: DraggedEntry[] = [];
+
+    for (const entry of sorted) {
+      const rel = entry.relativePath;
+      const ancestorDir = kept.find(existing =>
+        existing.kind === "dir" && this.isSameOrAncestor(existing.relativePath, rel));
+      if (ancestorDir && ancestorDir !== entry) continue;
+      kept.push(entry);
+    }
+
+    return kept;
+  }
+
+  private pathDepth(value: string): number {
+    if (!value) return 0;
+    return value.split("/").filter(Boolean).length;
+  }
+
+  private async moveEntry(entry: DraggedEntry, destination: DropDirectory): Promise<{ oldUri: vscode.Uri; newUri: vscode.Uri }[] | null> {
+    const sourceRelative = this.normalizeRelativePath(entry.relativePath);
+    const destRelative = this.normalizeRelativePath(destination.relativePath);
+
+    if (entry.kind === "dir" && this.isSameOrAncestor(sourceRelative, destRelative))
+      throw new Error(`Cannot move "${entry.name}" into itself or a descendant.`);
+
+    const sourceUri = entry.kind === "file"
+      ? vscode.Uri.parse(entry.uri)
+      : this.toWorkspaceUri(sourceRelative);
+
+    const parentRelative = this.parentPath(sourceRelative);
+    if (parentRelative === destRelative) return null;
+
+    const targetUri = vscode.Uri.joinPath(destination.uri, entry.name);
+    if (await this.pathExists(targetUri))
+      throw new Error(`"${entry.name}" already exists in the target folder.`);
+
+    const renames = entry.kind === "file"
+      ? [{ oldUri: sourceUri, newUri: targetUri }]
+      : this.collectTrackedFileRenamesForDir(sourceRelative, targetUri);
+
+    await vscode.workspace.fs.rename(sourceUri, targetUri, { overwrite: false });
+    return renames;
   }
 
   dispose(): void {

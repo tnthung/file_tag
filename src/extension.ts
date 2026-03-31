@@ -65,6 +65,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeDataProvider,
     canSelectMany: true,
     showCollapseAll: true,
+    dragAndDropController: treeDataProvider,
   });
 
   registerCommands(context, configManager, treeDataProvider, treeView, workspaceFolder, engine);
@@ -215,7 +216,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
     vscode.workspace.onDidRenameFiles(async (e) => {
       logTiming("treeUpdate", `workspace rename ${e.files.map(f => `${f.oldUri.path}->${f.newUri.path}`).join(", ")}`);
-      await engine.notifyFileRenamed("workspace:rename", e.files);
+      const expanded = treeDataProvider.expandTrackedRenameEntries(e.files);
+      const payload: readonly { oldUri: vscode.Uri; newUri: vscode.Uri }[] =
+        expanded.length > 0 ? expanded : e.files;
+      await engine.notifyFileRenamed("workspace:rename", payload);
     }),
   );
 
