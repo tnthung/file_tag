@@ -18,8 +18,134 @@ import {
 const LAST_VIEW_KEY = "fileTag.lastView";
 const WORKSPACE_FOLDER_PREFIX = "${workspaceFolder}/";
 
+const CLIPBOARD_CONTEXT_KEY = "fileTag.clipboardHasFile";
+
 // Internal clipboard for copy/paste file operations
-let copyClipboard: vscode.Uri | undefined;
+let copyClipboard: vscode.Uri[] = [];
+let systemClipboardHasFiles = false;
+let clipboardContextValue = false;
+let clipboardContextInitialized = false;
+let clipboardScanInFlight = false;
+
+function updateClipboardContext(): void {
+  const next = copyClipboard.length > 0 || systemClipboardHasFiles;
+  if (clipboardContextInitialized && next === clipboardContextValue) return;
+  clipboardContextInitialized = true;
+  clipboardContextValue = next;
+  void vscode.commands.executeCommand("setContext", CLIPBOARD_CONTEXT_KEY, next);
+}
+
+function isFileSystemNode(node: TreeNode): node is FileNode | DirNode {
+  return node.kind === "file" || node.kind === "dir";
+}
+
+function getSelectedFsNodes(node: TreeNode | undefined, treeView: vscode.TreeView<TreeNode>): (FileNode | DirNode)[] {
+  if (node && isFileSystemNode(node)) return [node];
+  const selection = treeView.selection.filter(isFileSystemNode);
+  return selection.length > 0 ? selection : [];
+}
+
+function getSingleFsNode(node: TreeNode | undefined, treeView: vscode.TreeView<TreeNode>): FileNode | DirNode | undefined {
+  const [first] = getSelectedFsNodes(node, treeView);
+  return first;
+}
+
+function getDirectoryTarget(node: TreeNode | undefined, treeView: vscode.TreeView<TreeNode>, workspaceFolder: vscode.WorkspaceFolder): vscode.Uri {
+  const current = node && isFileSystemNode(node) ? node : treeView.selection.find(isFileSystemNode);
+  if (!current) return workspaceFolder.uri;
+  if (current.kind === "dir")
+    return nodeUri(current, workspaceFolder);
+  return vscode.Uri.joinPath(nodeUri(current, workspaceFolder), "..");
+}
+
+function describeNode(node: TreeNode | undefined): string {
+  if (!node) return "none";
+  switch (node.kind) {
+    case "file":
+      return `file:${node.uri.fsPath}`;
+    case "dir":
+      return `dir:${node.relativePath}`;
+    case "viewList":
+      return `view:${node.name}`;
+    case "tag":
+      return `tag:${node.name}`;
+    default:
+      return node.kind;
+  }
+}
+
+function logCommandInvocation(command: string, node: TreeNode | undefined, treeView: vscode.TreeView<TreeNode>): void {
+  const selection = treeView.selection.map(describeNode).join(", ");
+  logTiming("commands", `${command} invoked | argument=${describeNode(node)} selection=[${selection}] totalSelection=${treeView.selection.length}`);
+}
+
+function setClipboardItems(uris: vscode.Uri[]): void {
+  copyClipboard = uris;
+  updateClipboardContext();
+}
+
+async function parseSystemClipboardUris(maxEntries = Number.POSITIVE_INFINITY): Promise<vscode.Uri[]> {
+  const text = (await vscode.env.clipboard.readText()).trim();
+  if (!text) return [];
+
+  const uris: vscode.Uri[] = [];
+  for (const line of text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)) {
+    let parsed: vscode.Uri | undefined;
+
+    try {
+      parsed = line.startsWith("file://") ? vscode.Uri.parse(line) : vscode.Uri.file(line);
+
+    } catch {
+      continue;
+    }
+
+    try {
+      await vscode.workspace.fs.stat(parsed);
+      uris.push(parsed);
+      if (uris.length >= maxEntries) break;
+
+    } catch {
+      // Ignore clipboard entries that do not exist on disk
+    }
+  }
+  return uris;
+}
+
+async function refreshSystemClipboardState(): Promise<void> {
+  if (clipboardScanInFlight) return;
+  clipboardScanInFlight = true;
+
+  try {
+    const hasFiles = (await parseSystemClipboardUris(1)).length > 0;
+    if (hasFiles !== systemClipboardHasFiles) {
+      systemClipboardHasFiles = hasFiles;
+      updateClipboardContext();
+    }
+
+  } finally {
+    clipboardScanInFlight = false;
+  }
+}
+
+async function findUniqueChildUri(dir: vscode.Uri, originalName: string): Promise<vscode.Uri> {
+  const dot = originalName.lastIndexOf(".");
+  const base = dot > 0 ? originalName.slice(0, dot) : originalName;
+  const ext = dot > 0 ? originalName.slice(dot) : "";
+
+  let attempt = originalName;
+  let counter = 1;
+  while (true) {
+    const candidate = vscode.Uri.joinPath(dir, attempt);
+    try {
+      await vscode.workspace.fs.stat(candidate);
+      counter++;
+      attempt = `${base} copy${counter === 2 ? "" : ` ${counter - 1}`}${ext}`;
+
+    } catch {
+      return candidate;
+    }
+  }
+}
 
 function toTagList(value: string | string[] | undefined): string[] {
   if (!value) return [];
@@ -155,6 +281,23 @@ export function registerCommands(
   workspaceFolder: vscode.WorkspaceFolder,
   engine: FileTagEngine,
 ): void {
+  updateClipboardContext();
+  void refreshSystemClipboardState();
+
+  const clipboardFocusDisposable = vscode.window.onDidChangeWindowState(state => {
+    if (state.focused)
+      void refreshSystemClipboardState();
+  });
+  const clipboardPollHandle = setInterval(() => {
+    if (vscode.window.state.focused)
+      void refreshSystemClipboardState();
+  }, 4000);
+
+  context.subscriptions.push(
+    clipboardFocusDisposable,
+    new vscode.Disposable(() => clearInterval(clipboardPollHandle)),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand("fileTag.createTag", async () => {
       const config = await configManager.read();
@@ -508,27 +651,68 @@ export function registerCommands(
       await vscode.env.clipboard.writeText(vscode.workspace.asRelativePath(uri, false));
     }),
 
-    vscode.commands.registerCommand("fileTag.copyFile", async (node: TreeNode) => {
-      copyClipboard = nodeUri(node, workspaceFolder);
-      vscode.commands.executeCommand("setContext", "fileTag.clipboardHasFile", true);
-    }),
-
-    vscode.commands.registerCommand("fileTag.pasteFile", async (node: TreeNode) => {
-      if (!copyClipboard) return;
-      const dirUri = nodeUri(node, workspaceFolder);
-      const fileName = copyClipboard.path.split("/").pop()!;
-      const targetUri = vscode.Uri.joinPath(dirUri, fileName);
-      try {
-        await vscode.workspace.fs.copy(copyClipboard, targetUri, { overwrite: false });
-        await engine.notifyFileCreated("command:pasteFile", [targetUri]);
-
-      } catch (e) {
-        vscode.window.showErrorMessage(`Paste failed: ${e}`);
+    vscode.commands.registerCommand("fileTag.copyFile", async (node?: TreeNode) => {
+      logCommandInvocation("fileTag.copyFile", node, treeView);
+      const targets = getSelectedFsNodes(node, treeView);
+      if (targets.length === 0) {
+        vscode.window.showInformationMessage("Select at least one file or directory to copy.");
+        return;
       }
+      const uris = targets.map(target => nodeUri(target, workspaceFolder));
+      setClipboardItems(uris);
+      vscode.window.setStatusBarMessage(`File Tag: copied ${uris.length} item${uris.length === 1 ? "" : "s"}`, 2000);
     }),
 
-    vscode.commands.registerCommand("fileTag.duplicateFile", async (node: TreeNode) => {
-      const uri = nodeUri(node, workspaceFolder);
+    vscode.commands.registerCommand("fileTag.pasteFile", async (node?: TreeNode) => {
+      logCommandInvocation("fileTag.pasteFile", node, treeView);
+      let sources = copyClipboard;
+      if (sources.length === 0) {
+        sources = await parseSystemClipboardUris();
+        systemClipboardHasFiles = sources.length > 0;
+        updateClipboardContext();
+        vscode.window.showInformationMessage("Clipboard does not contain copied files.");
+        return;
+      }
+
+      const destination = getDirectoryTarget(node, treeView, workspaceFolder);
+      const created: vscode.Uri[] = [];
+      for (const source of sources) {
+        const name = source.path.split("/").pop();
+        if (!name) continue;
+        let stat: vscode.FileStat;
+
+        try {
+          stat = await vscode.workspace.fs.stat(source);
+
+        } catch (error) {
+          vscode.window.showErrorMessage(`Paste skipped: source "${source.fsPath}" is not accessible.`);
+          continue;
+        }
+
+        try {
+          const targetUri = await findUniqueChildUri(destination, name);
+          await vscode.workspace.fs.copy(source, targetUri, { overwrite: false });
+          if ((stat.type & vscode.FileType.Directory) === 0)
+            created.push(targetUri);
+
+        } catch (error) {
+          vscode.window.showErrorMessage(`Paste failed for "${name}": ${error instanceof Error ? error.message : error}`);
+        }
+      }
+
+      if (created.length > 0)
+        await engine.notifyFileCreated("command:pasteFile", created);
+    }),
+
+    vscode.commands.registerCommand("fileTag.duplicateFile", async (node?: TreeNode) => {
+      logCommandInvocation("fileTag.duplicateFile", node, treeView);
+      const target = getSingleFsNode(node, treeView);
+      if (!target) {
+        vscode.window.showInformationMessage("Select a file or directory to duplicate.");
+        return;
+      }
+
+      const uri = nodeUri(target, workspaceFolder);
       const newUri = await findFreeCopyUri(uri);
       try {
         await vscode.workspace.fs.copy(uri, newUri, { overwrite: false });
@@ -539,17 +723,25 @@ export function registerCommands(
       }
     }),
 
-    vscode.commands.registerCommand("fileTag.renameFile", async (node: FileNode | DirNode) => {
-      const uri = nodeUri(node, workspaceFolder);
-      const dot = node.name.lastIndexOf(".");
-      const selEnd = node.kind === "file" && dot > 0 ? dot : node.name.length;
+    vscode.commands.registerCommand("fileTag.renameFile", async (node?: TreeNode) => {
+      logCommandInvocation("fileTag.renameFile", node, treeView);
+      const target = getSingleFsNode(node, treeView);
+      if (!target) {
+        vscode.window.showInformationMessage("Select a file or directory to rename.");
+        return;
+      }
+
+      const uri = nodeUri(target, workspaceFolder);
+      const dot = target.name.lastIndexOf(".");
+      const selEnd = target.kind === "file" && dot > 0 ? dot : target.name.length;
       const newName = await vscode.window.showInputBox({
         prompt: "New name",
-        value: node.name,
+        value: target.name,
         valueSelection: [0, selEnd],
         validateInput: v => v.includes("/") || v.includes("\\") ? "Name cannot contain path separators" : undefined,
       });
-      if (!newName || newName === node.name) return;
+
+      if (!newName || newName === target.name) return;
       const newUri = vscode.Uri.joinPath(uri, "..", newName);
       try {
         await vscode.workspace.fs.rename(uri, newUri, { overwrite: false });
@@ -560,21 +752,29 @@ export function registerCommands(
       }
     }),
 
-    vscode.commands.registerCommand("fileTag.deleteFile", async (node: FileNode | DirNode) => {
-      const uri = nodeUri(node, workspaceFolder);
-      logTiming("treeUpdate", `delete command invoked | target=${uri.toString()} kind=${node.kind} view=${treeDataProvider.getCurrentViewName() ?? "none"}`);
-      const answer = await vscode.window.showWarningMessage(
-        `Delete "${node.name}"?`,
-        { modal: true },
-        "Move to Trash",
-      );
-      if (answer !== "Move to Trash") return;
-      try {
-        await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-        await engine.notifyFileDeleted("command:deleteFile", [uri]);
+    vscode.commands.registerCommand("fileTag.deleteFile", async (node?: TreeNode) => {
+      logCommandInvocation("fileTag.deleteFile", node, treeView);
+      const targets = getSelectedFsNodes(node, treeView);
+      if (targets.length === 0) {
+        vscode.window.showInformationMessage("Select files or directories to delete.");
+        return;
+      }
 
-      } catch (e) {
-        vscode.window.showErrorMessage(`Delete failed: ${e}`);
+      const preview = targets.length === 1 ? `"${targets[0].name}"` : `${targets.length} items`;
+      const answer = await vscode.window.showWarningMessage(
+        `Delete ${preview}?`, { modal: true }, "Move to Trash");
+      if (answer !== "Move to Trash") return;
+
+      for (const target of targets) {
+        const uri = nodeUri(target, workspaceFolder);
+        logTiming("treeUpdate", `delete command invoked | target=${uri.toString()} kind=${target.kind} view=${treeDataProvider.getCurrentViewName() ?? "none"}`);
+        try {
+          await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
+          await engine.notifyFileDeleted("command:deleteFile", [uri]);
+
+        } catch (e) {
+          vscode.window.showErrorMessage(`Delete failed for "${target.name}": ${e}`);
+        }
       }
     }),
   );

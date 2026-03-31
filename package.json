@@ -283,8 +283,9 @@
         },
         {
           "command": "fileTag.pasteFile",
-          "when": "view == fileTagView && viewItem == fileTagDir && fileTag.clipboardHasFile",
-          "group": "5_cutcopypaste@2"
+          "when": "view == fileTagView && (viewItem == fileTagDir || viewItem == fileTagFile)",
+          "group": "5_cutcopypaste@2",
+          "enablement": "fileTag.clipboardHasFile"
         },
         {
           "command": "fileTag.duplicateFile",
@@ -312,8 +313,33 @@
           "group": "7_modification@2"
         }
       ]
-    }
-    ,
+    },
+    "keybindings": [
+      {
+        "command": "fileTag.deleteFile",
+        "key": "delete",
+        "mac": "cmd+backspace",
+        "when": "focusedView == fileTagView && !fileTag.selectingView"
+      },
+      {
+        "command": "fileTag.renameFile",
+        "key": "f2",
+        "mac": "enter",
+        "when": "focusedView == fileTagView && !fileTag.selectingView"
+      },
+      {
+        "command": "fileTag.copyFile",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "focusedView == fileTagView && !fileTag.selectingView"
+      },
+      {
+        "command": "fileTag.pasteFile",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "focusedView == fileTagView && !fileTag.selectingView"
+      }
+    ],
     "configuration": {
       "title": "File Tag",
       "properties": {

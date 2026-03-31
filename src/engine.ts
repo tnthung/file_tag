@@ -103,6 +103,7 @@ export class FileTagEngine implements vscode.Disposable {
     );
 
     this.setupWorkspaceWatcher();
+    this.registerWorkspaceEventHandlers();
   }
 
   dispose(): void {
@@ -212,6 +213,27 @@ export class FileTagEngine implements vscode.Disposable {
     );
   }
 
+  private registerWorkspaceEventHandlers(): void {
+    this.disposables.push(
+      vscode.workspace.onDidCreateFiles(event => {
+        const uris = event.files.filter(uri => this.isWithinWorkspace(uri));
+        if (uris.length > 0)
+          void this.notifyFileCreated("event:onDidCreateFiles", uris);
+      }),
+      vscode.workspace.onDidDeleteFiles(event => {
+        const uris = event.files.filter(uri => this.isWithinWorkspace(uri));
+        if (uris.length > 0)
+          void this.notifyFileDeleted("event:onDidDeleteFiles", uris);
+      }),
+      vscode.workspace.onDidRenameFiles(event => {
+        const files = event.files.filter(file =>
+          this.isWithinWorkspace(file.oldUri) || this.isWithinWorkspace(file.newUri));
+        if (files.length > 0)
+          void this.notifyFileRenamed("event:onDidRenameFiles", files);
+      }),
+    );
+  }
+
   private handleFileChange(uri: vscode.Uri): void {
     const key = uri.toString();
     this.pendingChangeUris.set(key, uri);
@@ -318,6 +340,10 @@ export class FileTagEngine implements vscode.Disposable {
     const relative = path.relative(base.fsPath, target.fsPath);
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
     return relative.split(path.sep).join("/");
+  }
+
+  private isWithinWorkspace(uri: vscode.Uri): boolean {
+    return this.relativeFrom(this.workspaceFolder.uri, uri) !== undefined;
   }
 
   private async updateViewsForTags(tagNames: Set<string>, reason: string): Promise<void> {

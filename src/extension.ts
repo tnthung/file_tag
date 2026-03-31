@@ -61,10 +61,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   await engine.init();
   const treeDataProvider = new FileTagTreeDataProvider(configManager, workspaceFolder, engine);
 
-  const treeView = vscode.window.createTreeView<TreeNode>("fileTagView", {
-    treeDataProvider,
-  });
-
+  const treeView = vscode.window.createTreeView<TreeNode>("fileTagView", { treeDataProvider });
   registerCommands(context, configManager, treeDataProvider, treeView, workspaceFolder, engine);
 
   let isTreeViewVisible = treeView.visible;
@@ -132,6 +129,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     logTiming("autoReveal", `onDidChangeActiveTextEditor invoked | follow=${followActiveEditor} visible=${isTreeViewVisible} editor=${describeEditor(editor)}`);
     if (!followActiveEditor) return;
     if (!editor) return;
+
     const node = treeDataProvider.findFileNode(editor.document.uri);
     if (node) {
       revealFileNode(node, "followActiveEditor");
@@ -160,6 +158,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeView.onDidChangeVisibility(event => {
       isTreeViewVisible = event.visible;
       logTiming("autoReveal", `tree visibility changed -> ${isTreeViewVisible}`);
+
       if (event.visible) {
         if (followActiveEditor)
           handleActiveEditorChange(vscode.window.activeTextEditor ?? undefined);
@@ -169,6 +168,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeView.onDidChangeSelection(event => {
       if (pendingAutoRevealTarget && Date.now() > pendingAutoRevealExpiresAt)
         clearPendingAutoReveal();
+
       const autoTriggered = pendingAutoRevealTarget
         ? event.selection.some(node => node.kind === "file" && node.uri.toString() === pendingAutoRevealTarget)
         : false;
@@ -225,6 +225,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   if (lastView in config.views) {
     await treeDataProvider.selectView(lastView);
     treeView.title = lastView;
+    if (followActiveEditor && isTreeViewVisible)
+      handleActiveEditorChange(vscode.window.activeTextEditor ?? undefined);
     return;
   }
 
