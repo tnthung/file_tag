@@ -323,6 +323,25 @@ async function findFreeCopyUri(uri: vscode.Uri): Promise<vscode.Uri> {
   }
 }
 
+// Collect known files beneath a tree node so directory deletions can remove
+// all descendant entries immediately.
+function collectKnownFileUris(target: FileNode | DirNode): vscode.Uri[] {
+  if (target.kind === "file")
+    return [target.uri];
+
+  const stack: TreeNode[] = [...target.children];
+  const uris: vscode.Uri[] = [];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    if (current.kind === "file")
+      uris.push(current.uri);
+    else if (current.kind === "dir")
+      stack.push(...current.children);
+  }
+  return uris;
+}
+
 
 export function registerCommands(
   context: vscode.ExtensionContext,
@@ -869,17 +888,25 @@ export function registerCommands(
         `Delete ${preview}?`, { modal: true }, "Move to Trash");
       if (answer !== "Move to Trash") return;
 
+      const pendingDeletionUris = new Map<string, vscode.Uri>();
       for (const target of targets) {
         const uri = nodeUri(target, workspaceFolder);
+        const knownUris = collectKnownFileUris(target);
         logTiming("treeUpdate", `delete command invoked | target=${uri.toString()} kind=${target.kind} view=${treeDataProvider.getCurrentViewName() ?? "none"}`);
+
         try {
           await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-          await engine.notifyFileDeleted("command:deleteFile", [uri]);
+          const entries = knownUris.length > 0 ? knownUris : [uri];
+          for (const entry of entries)
+            pendingDeletionUris.set(entry.toString(), entry);
 
         } catch (e) {
           vscode.window.showErrorMessage(`Delete failed for "${target.name}": ${e}`);
         }
       }
+
+      if (pendingDeletionUris.size > 0)
+        await engine.notifyFileDeleted("command:deleteFile", Array.from(pendingDeletionUris.values()));
     }),
   );
 }
