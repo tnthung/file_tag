@@ -11,6 +11,7 @@ export class ConfigManager {
   private readonly _onDidChange = new vscode.EventEmitter<FileTagConfig>();
   readonly onDidChange = this._onDidChange.event;
   private watcher: vscode.FileSystemWatcher | undefined;
+  private cachedConfig: FileTagConfig | undefined;
 
   constructor(private readonly workspaceFolder: vscode.WorkspaceFolder) {
     this.configUri = vscode.Uri.joinPath(
@@ -21,17 +22,30 @@ export class ConfigManager {
     return this.configUri;
   }
 
+  private normalizeConfig(parsed: unknown): FileTagConfig {
+    const config = (parsed ?? {}) as Partial<FileTagConfig>;
+    return {
+      tags: config.tags ?? {},
+      views: config.views ?? {},
+    };
+  }
+
+  private invalidateCache(): void {
+    this.cachedConfig = undefined;
+  }
+
   async read(): Promise<FileTagConfig> {
+    if (this.cachedConfig)
+      return this.cachedConfig;
+
     try {
       const raw = await vscode.workspace.fs.readFile(this.configUri);
-      const parsed = JSON.parse(Buffer.from(raw).toString("utf-8"));
-      return {
-        tags: parsed.tags ?? {},
-        views: parsed.views ?? {},
-      };
+      this.cachedConfig = this.normalizeConfig(JSON.parse(Buffer.from(raw).toString("utf-8")));
     } catch {
-      return { ...DEFAULT_CONFIG };
+      this.cachedConfig = { ...DEFAULT_CONFIG };
     }
+
+    return this.cachedConfig;
   }
 
   async write(config: FileTagConfig): Promise<void> {
@@ -46,7 +60,8 @@ export class ConfigManager {
     const content = JSON.stringify(config, null, 4) + "\n";
     await vscode.workspace.fs.writeFile(
       this.configUri, Buffer.from(content, "utf-8"));
-    this._onDidChange.fire(config);
+    this.cachedConfig = config;
+    this._onDidChange.fire(this.cachedConfig);
   }
 
   async ensureExists(): Promise<void> {
@@ -62,6 +77,7 @@ export class ConfigManager {
       new vscode.RelativePattern(this.workspaceFolder, `.vscode/${CONFIG_FILENAME}`),);
 
     const reload = async () => {
+      this.invalidateCache();
       const config = await this.read();
       this._onDidChange.fire(config);
     };
@@ -74,6 +90,7 @@ export class ConfigManager {
   }
 
   dispose(): void {
+    this.invalidateCache();
     this.watcher?.dispose();
     this._onDidChange.dispose();
   }

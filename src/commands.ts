@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { extractGlobs } from "./evaluator";
+import { FileTagEngine } from "./engine";
 import { ViewCondition } from "./types";
 import { ConfigManager } from "./config";
 import {
@@ -20,9 +20,64 @@ const WORKSPACE_FOLDER_PREFIX = "${workspaceFolder}/";
 // Internal clipboard for copy/paste file operations
 let copyClipboard: vscode.Uri | undefined;
 
+function toTagList(value: string | string[] | undefined): string[] {
+  if (!value) return [];
+  return Array.isArray(value) ? [...value] : [value];
+}
+
+function rebuildLogical(children: ViewCondition[], key: "union" | "or" | "intersect" | "and"): ViewCondition {
+  const filtered = children.filter(child => !(Array.isArray(child) && child.length === 0));
+  if (filtered.length === 0) return [];
+  if (filtered.length === 1) return filtered[0];
+  return { [key]: filtered } as ViewCondition;
+}
+
+function conditionIsEmpty(cond: ViewCondition): boolean {
+  if (typeof cond === "string") return false;
+  if (Array.isArray(cond)) return cond.length === 0;
+  if ("union" in cond) return (cond.union ?? []).length === 0;
+  if ("or" in cond) return (cond.or ?? []).length === 0;
+  if ("intersect" in cond) return (cond.intersect ?? []).length === 0;
+  if ("and" in cond) return (cond.and ?? []).length === 0;
+  if ("from" in cond) {
+    const include = toTagList(cond.from);
+    const exclude = toTagList(cond.exclude);
+    return include.length === 0 && exclude.length === 0;
+  }
+  if ("subtract" in cond)
+    return conditionIsEmpty(cond.subtract.include) && conditionIsEmpty(cond.subtract.exclude);
+  return false;
+}
+
 function removeTagFromCondition(cond: ViewCondition, tagName: string): ViewCondition {
   if (typeof cond === "string") return cond === tagName ? [] : cond;
   if (Array.isArray(cond)) return cond.filter(t => t !== tagName);
+
+  if ("union" in cond) {
+    const children = cond.union.map(c => removeTagFromCondition(c, tagName));
+    return rebuildLogical(children, "union");
+  }
+
+  if ("intersect" in cond) {
+    const children = cond.intersect.map(c => removeTagFromCondition(c, tagName));
+    return rebuildLogical(children, "intersect");
+  }
+
+  if ("subtract" in cond) {
+    return {
+      subtract: {
+        include: removeTagFromCondition(cond.subtract.include, tagName),
+        exclude: removeTagFromCondition(cond.subtract.exclude, tagName),
+      },
+    };
+  }
+
+  if ("from" in cond) {
+    const include = toTagList(cond.from).filter(t => t !== tagName);
+    const exclude = toTagList(cond.exclude).filter(t => t !== tagName);
+    if (include.length === 0 && exclude.length === 0) return [];
+    return exclude.length > 0 ? { from: include, exclude } : { from: include };
+  }
 
   if ("or"  in cond) {
     const children = cond.or.map( c => removeTagFromCondition(c, tagName)).filter(c => !Array.isArray(c) || c.length > 0);
@@ -45,6 +100,19 @@ function removeTagFromCondition(cond: ViewCondition, tagName: string): ViewCondi
 function renameTagInCondition(cond: ViewCondition, oldName: string, newName: string): ViewCondition {
   if (typeof cond === "string") return cond === oldName ? newName : cond;
   if (Array.isArray(cond)) return cond.map(t => t === oldName ? newName : t);
+  if ("union" in cond) return { union: cond.union.map(c => renameTagInCondition(c, oldName, newName)) };
+  if ("intersect" in cond) return { intersect: cond.intersect.map(c => renameTagInCondition(c, oldName, newName)) };
+  if ("subtract" in cond) return {
+    subtract: {
+      include: renameTagInCondition(cond.subtract.include, oldName, newName),
+      exclude: renameTagInCondition(cond.subtract.exclude, oldName, newName),
+    },
+  };
+  if ("from" in cond) {
+    const include = toTagList(cond.from).map(tag => tag === oldName ? newName : tag);
+    const exclude = toTagList(cond.exclude).map(tag => tag === oldName ? newName : tag);
+    return exclude.length > 0 ? { from: include, exclude } : { from: include };
+  }
   if ("or"  in cond) return { or:  cond.or.map( c => renameTagInCondition(c, oldName, newName)) };
   if ("and" in cond) return { and: cond.and.map(c => renameTagInCondition(c, oldName, newName)) };
   if ("not" in cond) return { not: renameTagInCondition(cond.not, oldName, newName) };
@@ -83,6 +151,7 @@ export function registerCommands(
   treeDataProvider: FileTagTreeDataProvider,
   treeView: vscode.TreeView<TreeNode>,
   workspaceFolder: vscode.WorkspaceFolder,
+  engine: FileTagEngine,
 ): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("fileTag.createTag", async () => {
@@ -192,7 +261,7 @@ export function registerCommands(
         return;
       }
 
-      const globs = await extractGlobs(condition, config, workspaceFolder);
+      const globs = await engine.getSearchGlobs(viewName);
       if (!globs.include && !globs.exclude) {
         vscode.window.showInformationMessage("View resolves to no files.");
         return;
@@ -355,9 +424,7 @@ export function registerCommands(
 
     vscode.commands.registerCommand("fileTag.previewTag", async (node: TagNode) => {
       if (!node || node.kind !== "tag") return;
-      const config = await configManager.read();
-      const patterns = config.tags[node.name] ?? [];
-      await treeDataProvider.showTagPreview(node.name, patterns);
+      await treeDataProvider.showTagPreview(node.name);
       treeView.title = `${node.name} (preview)`;
     }),
 

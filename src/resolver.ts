@@ -1,5 +1,10 @@
 import * as os from "os";
 import * as vscode from "vscode";
+import { performance } from "perf_hooks";
+import {
+  TimingLog,
+  logTiming,
+} from "./timing";
 
 
 /**
@@ -65,10 +70,13 @@ function looksLikeDirectory(glob: string): boolean {
 export async function resolveTag(
   patterns: string[],
   workspaceFolder: vscode.WorkspaceFolder,
+  traceLabel = "resolveTag",
 ): Promise<vscode.Uri[]> {
+  const timing = new TimingLog(traceLabel);
   const seen = new Map<string, vscode.Uri>();
 
   const allUris = await Promise.all(patterns.map(async pattern => {
+    const startedAt = performance.now();
     const { base, glob } = parsePattern(pattern, workspaceFolder);
     const searches = [
       Promise.resolve(vscode.workspace.findFiles(new vscode.RelativePattern(base, glob))),
@@ -76,13 +84,19 @@ export async function resolveTag(
     // If the last segment looks like a directory, also search inside it
     if (looksLikeDirectory(glob))
       searches.push(Promise.resolve(vscode.workspace.findFiles(new vscode.RelativePattern(base, glob + "/**"))));
-    return (await Promise.all(searches)).flat();
+    const uris = (await Promise.all(searches)).flat();
+    logTiming(traceLabel, `pattern ${JSON.stringify(pattern)}: ${(performance.now() - startedAt).toFixed(1)} ms | ${uris.length} matches`);
+    return uris;
   }));
+
+  timing.step("resolve patterns", `${patterns.length} patterns`);
 
   for (const uris of allUris)
     for (const uri of uris)
       seen.set(uri.toString(), uri);
 
+  timing.step("dedupe matches", `${seen.size} unique files`);
+  timing.end();
   return Array.from(seen.values());
 }
 

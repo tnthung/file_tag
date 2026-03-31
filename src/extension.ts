@@ -1,26 +1,39 @@
 import * as vscode from "vscode";
 import { ConfigManager } from "./config";
 import { registerCommands } from "./commands";
-import { FileTagTreeDataProvider, TreeNode } from "./treeDataProvider";
+import {
+  TreeNode,
+  FileTagTreeDataProvider,
+} from "./treeDataProvider";
+import { FileTagEngine } from "./engine";
+import {
+  getTimingOutputChannel,
+  showTimingOutputChannel,
+} from "./timing";
 
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders || workspaceFolders.length === 0) return;
 
   const workspaceFolder = workspaceFolders[0];
   const configManager = new ConfigManager(workspaceFolder);
-  const treeDataProvider = new FileTagTreeDataProvider(configManager, workspaceFolder);
+  const engine = new FileTagEngine(workspaceFolder, configManager);
+  await engine.init();
+  const treeDataProvider = new FileTagTreeDataProvider(configManager, workspaceFolder, engine);
 
   const treeView = vscode.window.createTreeView<TreeNode>("fileTagView", {
     treeDataProvider,
   });
 
-  registerCommands(context, configManager, treeDataProvider, treeView, workspaceFolder);
+  registerCommands(context, configManager, treeDataProvider, treeView, workspaceFolder, engine);
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("fileTag.showTimingLog", () => {
+      showTimingOutputChannel();
+    }),
     configManager.setupWatcher(),
-    configManager.onDidChange(async () => { await treeDataProvider.refresh(); }),
+    getTimingOutputChannel(),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (!editor) return;
       const node = treeDataProvider.findFileNode(editor.document.uri);
@@ -28,27 +41,26 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     treeView,
     { dispose: () => configManager.dispose() },
-    { dispose: () => treeDataProvider.dispose() });
-
-  configManager.ensureExists();
+    { dispose: () => treeDataProvider.dispose() },
+    engine,
+  );
 
   // Restore last view if it still exists in config, otherwise show view list
   const lastView = context.workspaceState.get<string>("fileTag.lastView");
   if (!lastView) {
-    treeDataProvider.loadViews();
+    await treeDataProvider.loadViews();
     return;
   }
 
-  configManager.read().then(config => {
-    if (lastView in config.views) {
-      treeDataProvider.selectView(lastView).then(() =>
-        treeView.title = lastView);
-      return;
-    }
+  const config = await configManager.read();
+  if (lastView in config.views) {
+    await treeDataProvider.selectView(lastView);
+    treeView.title = lastView;
+    return;
+  }
 
-    context.workspaceState.update("fileTag.lastView", undefined);
-    treeDataProvider.loadViews();
-  });
+  await context.workspaceState.update("fileTag.lastView", undefined);
+  await treeDataProvider.loadViews();
 }
 
 

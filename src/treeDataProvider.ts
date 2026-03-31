@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { resolveTag } from "./resolver";
 import { ConfigManager } from "./config";
-import { evaluateCondition } from "./evaluator";
+import { FileTagEngine } from "./engine";
+import { TimingLog } from "./timing";
 
 
 // --- Node types ---
@@ -50,45 +50,60 @@ export type TreeNode = FileNode | DirNode | ViewListNode | CategoryNode | TagNod
 
 // --- Tree building helpers ---
 
-function insertUri(
-  children: Map<string, TreeNode>,
-  parts: string[],
-  uri: vscode.Uri,
-  depth: number,
-): void {
-  const name = parts[depth];
-  const isFile = depth === parts.length - 1;
+interface MutableDirNode extends DirNode {
+  childMap?: Map<string, TreeNode>;
+}
 
-  if (isFile) {
-    children.set(name, { kind: "file", name, uri });
-    return;
+function createDirNode(name: string, relativePath: string): MutableDirNode {
+  return {
+    kind: "dir",
+    name,
+    relativePath,
+    children: [],
+    childMap: new Map<string, TreeNode>(),
+  };
+}
+
+function finalizeNodes(children: Map<string, TreeNode>): TreeNode[] {
+  const nodes = Array.from(children.values());
+  for (const node of nodes) {
+    if (node.kind !== "dir") continue;
+    const dirNode = node as MutableDirNode;
+    dirNode.children = finalizeNodes(dirNode.childMap ?? new Map<string, TreeNode>());
+    delete dirNode.childMap;
   }
-
-  let node = children.get(name);
-  if (!node || node.kind !== "dir")
-    children.set(name, node = {
-      kind: "dir",
-      name,
-      relativePath: parts.slice(0, depth + 1).join("/"),
-      children: [],
-    });
-
-  const dirNode = node as DirNode;
-  const childMap = new Map<string, TreeNode>();
-  for (const child of dirNode.children)
-    childMap.set(nodeName(child), child);
-
-  insertUri(childMap, parts, uri, depth + 1);
-  dirNode.children = sortNodes(Array.from(childMap.values()));
+  return sortNodes(nodes);
 }
 
 function buildTreeFromParts(uris: vscode.Uri[], workspaceFolder: vscode.WorkspaceFolder): TreeNode[] {
   const rootMap = new Map<string, TreeNode>();
+
   for (const uri of uris) {
     const rel = vscode.workspace.asRelativePath(uri, false);
-    insertUri(rootMap, rel.split("/"), uri, 0);
+    const parts = rel.split("/");
+    let children = rootMap;
+
+    for (let depth = 0; depth < parts.length; depth++) {
+      const name = parts[depth];
+      const isFile = depth === parts.length - 1;
+
+      if (isFile) {
+        children.set(name, { kind: "file", name, uri });
+        break;
+      }
+
+      let node = children.get(name);
+      if (!node || node.kind !== "dir") {
+        node = createDirNode(name, parts.slice(0, depth + 1).join("/"));
+        children.set(name, node);
+      }
+
+      children = (node as MutableDirNode).childMap ?? new Map<string, TreeNode>();
+      (node as MutableDirNode).childMap = children;
+    }
   }
-  return sortNodes(Array.from(rootMap.values()));
+
+  return finalizeNodes(rootMap);
 }
 
 function nodeName(n: TreeNode): string {
@@ -117,12 +132,13 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private currentViewName: string | undefined;
-  private previewState: { name: string; patterns: string[] } | undefined;
+  private previewState: { name: string } | undefined;
   private showingFiles = false;
   private loading = false;
   private rootNodes: TreeNode[] = [];
   private fileNodeByUri = new Map<string, FileNode>();
   private parentByNode = new WeakMap<TreeNode, TreeNode | undefined>();
+  private readonly disposables: vscode.Disposable[] = [];
 
   // Selection-mode data
   private viewNodes: ViewListNode[] = [];
@@ -131,7 +147,12 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   constructor(
     private readonly configManager: ConfigManager,
     private readonly workspaceFolder: vscode.WorkspaceFolder,
-  ) {}
+    private readonly engine: FileTagEngine,
+  ) {
+    this.disposables.push(
+      this.engine.onDidInvalidate(() => { void this.refresh(); }),
+    );
+  }
 
   private clearFileTree(): void {
     this.rootNodes = [];
@@ -171,9 +192,10 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     await this.loadViews();
   }
 
-  async showTagPreview(name: string, patterns: string[]): Promise<void> {
+  async showTagPreview(name: string): Promise<void> {
+    const timing = new TimingLog(`showTagPreview(${name})`);
     this.currentViewName = undefined;
-    this.previewState = { name, patterns };
+    this.previewState = { name };
     this.showingFiles = true;
     this.loading = true;
     this.clearFileTree();
@@ -182,8 +204,18 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
     this._onDidChangeTreeData.fire();
 
     try {
-      const uris = await resolveTag(patterns, this.workspaceFolder);
-      this.setRootNodes(buildTreeFromParts(uris, this.workspaceFolder));
+      const uris = await this.engine.evaluateTags([name], `preview:${name}`);
+      timing.step("resolve tag patterns", `${uris.length} files`);
+
+      const rootNodes = buildTreeFromParts(uris, this.workspaceFolder);
+      timing.step("build tree", `${rootNodes.length} root nodes`);
+
+      this.setRootNodes(rootNodes);
+      timing.step("index tree", `${uris.length} files`);
+      timing.end();
+    } catch (error) {
+      timing.fail(error);
+      throw error;
     } finally {
       this.loading = false;
       this._onDidChangeTreeData.fire();
@@ -210,6 +242,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   }
 
   async selectView(viewName: string): Promise<void> {
+    const timing = new TimingLog(`selectView(${viewName})`);
     this.currentViewName = viewName;
     this.previewState = undefined;
     this.showingFiles = true;
@@ -221,12 +254,20 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
     try {
       const config = await this.configManager.read();
-      const condition = config.views[viewName];
-      this.setRootNodes(condition
-        ? buildTreeFromParts(
-          await evaluateCondition(condition, config, this.workspaceFolder),
-          this.workspaceFolder)
-        : []);
+      timing.step("read config", `${Object.keys(config.tags).length} tags, ${Object.keys(config.views).length} views`);
+
+      const uris = await this.engine.evaluateView(viewName);
+      timing.step("evaluate condition", `${uris.length} files`);
+
+      const rootNodes = buildTreeFromParts(uris, this.workspaceFolder);
+      timing.step("build tree", `${rootNodes.length} root nodes`);
+
+      this.setRootNodes(rootNodes);
+      timing.step("index tree", `${uris.length} files`);
+      timing.end();
+    } catch (error) {
+      timing.fail(error);
+      throw error;
     } finally {
       this.loading = false;
       this._onDidChangeTreeData.fire();
@@ -235,7 +276,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
 
   async refresh(): Promise<void> {
     if (this.currentViewName) return this.selectView(this.currentViewName);
-    if (this.previewState) return this.showTagPreview(this.previewState.name, this.previewState.patterns);
+    if (this.previewState) return this.showTagPreview(this.previewState.name);
     return this.loadViews();
   }
 
@@ -329,6 +370,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   }
 
   dispose(): void {
+    vscode.Disposable.from(...this.disposables).dispose();
     this._onDidChangeTreeData.dispose();
   }
 }
