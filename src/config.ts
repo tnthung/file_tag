@@ -41,6 +41,7 @@ export class ConfigManager {
     try {
       const raw = await vscode.workspace.fs.readFile(this.configUri);
       this.cachedConfig = this.normalizeConfig(JSON.parse(Buffer.from(raw).toString("utf-8")));
+
     } catch {
       this.cachedConfig = { ...DEFAULT_CONFIG };
     }
@@ -53,6 +54,7 @@ export class ConfigManager {
       this.workspaceFolder.uri, ".vscode");
     try {
       await vscode.workspace.fs.stat(vscodeDir);
+
     } catch {
       await vscode.workspace.fs.createDirectory(vscodeDir);
     }
@@ -67,6 +69,7 @@ export class ConfigManager {
   async ensureExists(): Promise<void> {
     try {
       await vscode.workspace.fs.stat(this.configUri);
+
     } catch {
       await this.write({ ...DEFAULT_CONFIG });
     }

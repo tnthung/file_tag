@@ -75,6 +75,10 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "fileTag.showTimingLog",
+        "title": "File Tag: Show Timing Log"
+      },
+      {
         "command": "fileTag.editView",
         "title": "Edit",
         "icon": "$(gear)"
@@ -184,6 +188,11 @@
           "command": "fileTag.searchInView",
           "when": "view == fileTagView && !fileTag.selectingView",
           "group": "navigation@3"
+        },
+        {
+          "command": "fileTag.refreshView",
+          "when": "view == fileTagView && !fileTag.selectingView",
+          "group": "navigation@5"
         },
         {
           "command": "fileTag.openConfig",
@@ -304,6 +313,17 @@
         }
       ]
     }
+    ,
+    "configuration": {
+      "title": "File Tag",
+      "properties": {
+        "fileTag.followActiveEditor": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reveal the active editor inside the File Tag tree when the view is visible."
+        }
+      }
+    }
   },
   "scripts": {
     "build": "node esbuild.mjs",
@@ -311,9 +331,12 @@
     "check": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "@types/vscode": "^1.85.0",
-    "@types/node": "^20.0.0",
-    "typescript": "^5.5.0",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.27.4",
+    "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "minimatch": "^10.2.5"
   }
 }

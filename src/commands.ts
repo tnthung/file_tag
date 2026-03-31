@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { logTiming } from "./timing";
 import { FileTagEngine } from "./engine";
 import { ViewCondition } from "./types";
 import { ConfigManager } from "./config";
@@ -138,6 +139,7 @@ async function findFreeCopyUri(uri: vscode.Uri): Promise<vscode.Uri> {
       await vscode.workspace.fs.stat(candidate);
       candidate = vscode.Uri.joinPath(parent, `${base} copy ${n}${ext}`);
       n++;
+
     } catch {
       return candidate;
     }
@@ -455,7 +457,7 @@ export function registerCommands(
     vscode.commands.registerCommand("fileTag.refreshView", async () => {
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Window, title: "File Tag: Refreshing..." },
-        () => treeDataProvider.refresh());
+        () => treeDataProvider.refresh("command:refreshView"));
       vscode.window.setStatusBarMessage("$(check) File Tag refreshed", 2000);
     }),
 
@@ -518,7 +520,8 @@ export function registerCommands(
       const targetUri = vscode.Uri.joinPath(dirUri, fileName);
       try {
         await vscode.workspace.fs.copy(copyClipboard, targetUri, { overwrite: false });
-        await treeDataProvider.refresh();
+        await engine.notifyFileCreated("command:pasteFile", [targetUri]);
+
       } catch (e) {
         vscode.window.showErrorMessage(`Paste failed: ${e}`);
       }
@@ -529,7 +532,8 @@ export function registerCommands(
       const newUri = await findFreeCopyUri(uri);
       try {
         await vscode.workspace.fs.copy(uri, newUri, { overwrite: false });
-        await treeDataProvider.refresh();
+        await engine.notifyFileCreated("command:duplicateFile", [newUri]);
+
       } catch (e) {
         vscode.window.showErrorMessage(`Duplicate failed: ${e}`);
       }
@@ -549,7 +553,8 @@ export function registerCommands(
       const newUri = vscode.Uri.joinPath(uri, "..", newName);
       try {
         await vscode.workspace.fs.rename(uri, newUri, { overwrite: false });
-        await treeDataProvider.refresh();
+        await engine.notifyFileRenamed("command:renameFile", [{ oldUri: uri, newUri }]);
+
       } catch (e) {
         vscode.window.showErrorMessage(`Rename failed: ${e}`);
       }
@@ -557,6 +562,7 @@ export function registerCommands(
 
     vscode.commands.registerCommand("fileTag.deleteFile", async (node: FileNode | DirNode) => {
       const uri = nodeUri(node, workspaceFolder);
+      logTiming("treeUpdate", `delete command invoked | target=${uri.toString()} kind=${node.kind} view=${treeDataProvider.getCurrentViewName() ?? "none"}`);
       const answer = await vscode.window.showWarningMessage(
         `Delete "${node.name}"?`,
         { modal: true },
@@ -565,7 +571,8 @@ export function registerCommands(
       if (answer !== "Move to Trash") return;
       try {
         await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
-        await treeDataProvider.refresh();
+        await engine.notifyFileDeleted("command:deleteFile", [uri]);
+
       } catch (e) {
         vscode.window.showErrorMessage(`Delete failed: ${e}`);
       }

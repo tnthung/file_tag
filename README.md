@@ -5,7 +5,7 @@ A VS Code extension that lets you tag files and directories using glob patterns,
 ## Features
 
 - **Tags** — group files with glob patterns (supports wildcards)
-- **Views** — define named views using logical conditions over tags (`and`, `or`, `not`)
+- **Views** — define named views using set operations over tags (`union`, `intersect`, `subtract`, `from/exclude`)
 - **Side panel** — browse view files in a nested tree, just like the Explorer
 - **Editor sync** — active file is automatically revealed in the panel
 - **Search in view** — scope VS Code's built-in search to the current view's files
@@ -41,7 +41,12 @@ Config is stored at `.vscode/file-tag.json` and auto-reloads on save.
   },
   "views": {
     "Frontend": "frontend",
-    "Backend only": { "and": ["backend", { "not": "tests" }] },
+    "Backend only": {
+      "subtract": {
+        "include": "backend",
+        "exclude": "tests"
+      }
+    },
     "All source": ["frontend", "backend"]
   }
 }
@@ -73,11 +78,17 @@ Standard glob wildcards apply:
 |-----------|---------|---------|
 | `string` | `"frontend"` | All files in tag |
 | `string[]` | `["frontend", "backend"]` | Union of tags |
-| `{ and: [...] }` | `{ "and": ["frontend", "backend"] }` | Intersection |
-| `{ or: [...] }` | `{ "or": ["frontend", "backend"] }` | Union |
-| `{ not: ... }` | `{ "not": "tests" }` | All files except tag |
+| `{ union: [...] }` | `{ "union": ["frontend", "backend"] }` | Union |
+| `{ intersect: [...] }` | `{ "intersect": ["frontend", "backend"] }` | Intersection |
+| `{ subtract: { include, exclude } }` | `{ "subtract": { "include": "backend", "exclude": "tests" } }` | Set difference |
+| `{ from, exclude }` | `{ "from": ["backend"], "exclude": ["tests"] }` | Optimized tag-only difference |
+| `{ not: ... }` | `{ "not": "tests" }` | All files except tag (falls back to workspace-wide scan) |
 
-Conditions can be nested to any depth.
+Legacy `{ and | or | not }` objects are still loaded, but new configs should prefer the set-operation keys. Conditions can be nested to any depth.
+
+### Settings
+
+- `fileTag.followActiveEditor` (default: `false`) — automatically reveal the active editor in the File Tag tree when the view is visible. Enable this if you prefer the panel to track your editor focus.
 
 ## Panel Toolbar
 

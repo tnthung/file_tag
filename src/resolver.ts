@@ -18,7 +18,7 @@ import {
  *
  * Patterns without a variable prefix are treated as workspace-relative.
  */
-function parsePattern(
+export function parsePattern(
   pattern: string,
   workspaceFolder: vscode.WorkspaceFolder,
 ): { base: vscode.Uri; glob: string } {
@@ -57,7 +57,7 @@ function parsePattern(
 // (no glob characters, no file extension). Such patterns are also searched
 // with "/**" appended so that directory contents are included.
 // e.g. "**/node_modules" -> also search "**/node_modules/**"
-function looksLikeDirectory(glob: string): boolean {
+export function looksLikeDirectory(glob: string): boolean {
   const last = glob.split("/").pop() ?? "";
   return last.length > 0
     && !last.includes("*")
