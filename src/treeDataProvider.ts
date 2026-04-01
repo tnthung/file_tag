@@ -97,6 +97,9 @@ function finalizeNodes(children: Map<string, TreeNode>): TreeNode[] {
 }
 
 function toWorkspaceRelativeParts(uri: vscode.Uri, workspaceFolder: vscode.WorkspaceFolder): string[] | undefined {
+  if (uri.scheme !== workspaceFolder.uri.scheme)
+    return undefined;
+
   const relative = path.relative(workspaceFolder.uri.fsPath, uri.fsPath);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
     return undefined;
@@ -404,10 +407,7 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   }
 
   private relativePathForUri(uri: vscode.Uri): string {
-    const relative = path.relative(this.workspaceFolder.uri.fsPath, uri.fsPath);
-    if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
-      return "";
-    return relative.split(path.sep).join("/");
+    return toWorkspaceRelativeParts(uri, this.workspaceFolder)?.join("/") ?? "";
   }
 
   private normalizeRelativePath(value: string | undefined): string {
