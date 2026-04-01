@@ -96,14 +96,24 @@ function finalizeNodes(children: Map<string, TreeNode>): TreeNode[] {
   return sortNodes(nodes);
 }
 
+function toWorkspaceRelativeParts(uri: vscode.Uri, workspaceFolder: vscode.WorkspaceFolder): string[] | undefined {
+  const relative = path.relative(workspaceFolder.uri.fsPath, uri.fsPath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative))
+    return undefined;
+
+  const normalized = relative.split(path.sep).join("/");
+  const parts = normalized.split("/").filter(part => part.length > 0);
+  return parts.length === 0 ? undefined : parts;
+}
+
 function buildTreeFromParts(uris: vscode.Uri[], workspaceFolder: vscode.WorkspaceFolder): TreeNode[] {
   const rootMap = new Map<string, TreeNode>();
 
   for (const uri of uris) {
-    const rel = vscode.workspace.asRelativePath(uri, false);
-    const parts = rel.split("/");
-    let children = rootMap;
+    const parts = toWorkspaceRelativeParts(uri, workspaceFolder);
+    if (!parts) continue;
 
+    let children = rootMap;
     for (let depth = 0; depth < parts.length; depth++) {
       const name = parts[depth];
       const isFile = depth === parts.length - 1;
@@ -256,8 +266,11 @@ export class FileTagTreeDataProvider implements vscode.TreeDataProvider<TreeNode
   private insertFileNode(uri: vscode.Uri): boolean {
     const key = uri.toString();
     if (this.fileNodeByUri.has(key)) return false;
-    const rel = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, "/");
-    const parts = rel.split("/");
+
+    const rel = this.relativePathForUri(uri);
+    if (!rel) return false;
+
+    const parts = rel.split("/").filter(part => part.length > 0);
     if (parts.length === 0) return false;
 
     let nodes = this.rootNodes;
