@@ -1,3 +1,4 @@
+import * as path from "path";
 import * as vscode from "vscode";
 import { logTiming } from "./timing";
 import { FileTagEngine } from "./engine";
@@ -20,8 +21,11 @@ const WORKSPACE_FOLDER_PREFIX = "${workspaceFolder}/";
 
 const CLIPBOARD_CONTEXT_KEY = "fileTag.clipboardHasFile";
 
+type ClipboardEntry = { uri: vscode.Uri; kind: "file" | "dir" };
+
 // Internal clipboard for copy/paste file operations
-let copyClipboard: vscode.Uri[] = [];
+let copyClipboard: ClipboardEntry[] = [];
+let clipboardMode: "copy" | "cut" | undefined;
 let systemClipboardHasFiles = false;
 let clipboardContextValue = false;
 let clipboardContextInitialized = false;
@@ -130,8 +134,15 @@ function joinPathSegments(base: vscode.Uri, segments: string[]): vscode.Uri {
   return current;
 }
 
-function setClipboardItems(uris: vscode.Uri[]): void {
-  copyClipboard = uris;
+function setClipboardItems(entries: ClipboardEntry[], mode: "copy" | "cut" = "copy"): void {
+  copyClipboard = entries;
+  clipboardMode = entries.length > 0 ? mode : undefined;
+  updateClipboardContext();
+}
+
+function clearInternalClipboard(): void {
+  copyClipboard = [];
+  clipboardMode = undefined;
   updateClipboardContext();
 }
 
@@ -300,6 +311,15 @@ function renameTagInCondition(cond: ViewCondition, oldName: string, newName: str
 function nodeUri(node: TreeNode, workspaceFolder: vscode.WorkspaceFolder): vscode.Uri {
   if (node.kind === "file") return node.uri;
   return vscode.Uri.joinPath(workspaceFolder.uri, (node as DirNode).relativePath);
+}
+
+function normalizeFsPath(uri: vscode.Uri): string {
+  return path.normalize(uri.fsPath).toLowerCase();
+}
+
+function isWithinOrEqual(parent: vscode.Uri, candidate: vscode.Uri): boolean {
+  const relative = path.relative(parent.fsPath, candidate.fsPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function findFreeCopyUri(uri: vscode.Uri): Promise<vscode.Uri> {
@@ -781,40 +801,112 @@ export function registerCommands(
         vscode.window.showInformationMessage("Select at least one file or directory to copy.");
         return;
       }
-      const uris = targets.map(target => nodeUri(target, workspaceFolder));
-      setClipboardItems(uris);
-      vscode.window.setStatusBarMessage(`File Tag: copied ${uris.length} item${uris.length === 1 ? "" : "s"}`, 2000);
+      const entries = targets.map(target => ({ uri: nodeUri(target, workspaceFolder), kind: target.kind }));
+      setClipboardItems(entries, "copy");
+      vscode.window.setStatusBarMessage(`File Tag: copied ${entries.length} item${entries.length === 1 ? "" : "s"}`, 2000);
+    }),
+
+    vscode.commands.registerCommand("fileTag.cutFile", async (node?: TreeNode) => {
+      logCommandInvocation("fileTag.cutFile", node, treeView);
+      const targets = getSelectedFsNodes(node, treeView);
+      if (targets.length === 0) {
+        vscode.window.showInformationMessage("Select files or directories to cut.");
+        return;
+      }
+      const entries = targets.map(target => ({ uri: nodeUri(target, workspaceFolder), kind: target.kind }));
+      setClipboardItems(entries, "cut");
+      vscode.window.setStatusBarMessage(`File Tag: cut ${entries.length} item${entries.length === 1 ? "" : "s"}`, 2000);
     }),
 
     vscode.commands.registerCommand("fileTag.pasteFile", async (node?: TreeNode) => {
       logCommandInvocation("fileTag.pasteFile", node, treeView);
-      let sources = copyClipboard;
-      if (sources.length === 0) {
-        sources = await parseSystemClipboardUris();
-        systemClipboardHasFiles = sources.length > 0;
+      let pasteSources: ClipboardEntry[] = copyClipboard;
+      const usingInternalClipboard = pasteSources.length > 0;
+      if (!usingInternalClipboard) {
+        const uris = await parseSystemClipboardUris();
+        systemClipboardHasFiles = uris.length > 0;
         updateClipboardContext();
-        vscode.window.showInformationMessage("Clipboard does not contain copied files.");
-        return;
+        if (uris.length === 0) {
+          vscode.window.showInformationMessage("Clipboard does not contain copied files.");
+          return;
+        }
+        pasteSources = uris.map(uri => ({ uri, kind: "file" }));
       }
 
       const destination = getDirectoryTarget(node, treeView, workspaceFolder);
+      const isCutOperation = usingInternalClipboard && clipboardMode === "cut";
+
+      if (isCutOperation) {
+        const renameEntries: { oldUri: vscode.Uri; newUri: vscode.Uri }[] = [];
+        const failures: string[] = [];
+
+        for (const entry of pasteSources) {
+          const name = path.basename(entry.uri.fsPath);
+          if (!name) continue;
+          let stat: vscode.FileStat;
+
+          try {
+            stat = await vscode.workspace.fs.stat(entry.uri);
+
+          } catch {
+            failures.push(`"${entry.uri.fsPath}" is not accessible.`);
+            continue;
+          }
+
+          const entryIsDir = (stat.type & vscode.FileType.Directory) !== 0;
+          if (entryIsDir && isWithinOrEqual(entry.uri, destination)) {
+            failures.push(`Cannot move "${name}" into itself or its descendant.`);
+            continue;
+          }
+
+          const targetUri = vscode.Uri.joinPath(destination, name);
+          if (normalizeFsPath(entry.uri) === normalizeFsPath(targetUri))
+            continue;
+
+          if (await pathExists(targetUri)) {
+            failures.push(`"${name}" already exists in the target folder.`);
+            continue;
+          }
+
+          try {
+            await vscode.workspace.fs.rename(entry.uri, targetUri, { overwrite: false });
+            renameEntries.push({ oldUri: entry.uri, newUri: targetUri });
+
+          } catch (error) {
+            failures.push(`Move failed for "${name}": ${error instanceof Error ? error.message : error}`);
+          }
+        }
+
+        if (renameEntries.length > 0) {
+          const expanded = treeDataProvider.expandTrackedRenameEntries(renameEntries);
+          const payload = expanded.length > 0 ? expanded : renameEntries;
+          await engine.notifyFileRenamed("command:pasteFile:cut", payload);
+          clearInternalClipboard();
+          vscode.window.setStatusBarMessage(`File Tag: moved ${renameEntries.length} item${renameEntries.length === 1 ? "" : "s"}`, 2000);
+        }
+
+        if (failures.length > 0)
+          vscode.window.showErrorMessage(failures.join(" | "));
+        return;
+      }
+
       const created: vscode.Uri[] = [];
-      for (const source of sources) {
-        const name = source.path.split("/").pop();
+      for (const entry of pasteSources) {
+        const name = path.basename(entry.uri.fsPath);
         if (!name) continue;
         let stat: vscode.FileStat;
 
         try {
-          stat = await vscode.workspace.fs.stat(source);
+          stat = await vscode.workspace.fs.stat(entry.uri);
 
         } catch (error) {
-          vscode.window.showErrorMessage(`Paste skipped: source "${source.fsPath}" is not accessible.`);
+          vscode.window.showErrorMessage(`Paste skipped: source "${entry.uri.fsPath}" is not accessible.`);
           continue;
         }
 
         try {
           const targetUri = await findUniqueChildUri(destination, name);
-          await vscode.workspace.fs.copy(source, targetUri, { overwrite: false });
+          await vscode.workspace.fs.copy(entry.uri, targetUri, { overwrite: false });
           if ((stat.type & vscode.FileType.Directory) === 0)
             created.push(targetUri);
 
