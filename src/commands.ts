@@ -18,8 +18,8 @@ import {
 
 const LAST_VIEW_KEY = "fileTag.lastView";
 const WORKSPACE_FOLDER_PREFIX = "${workspaceFolder}/";
-
 const CLIPBOARD_CONTEXT_KEY = "fileTag.clipboardHasFile";
+
 
 type ClipboardEntry = { uri: vscode.Uri; kind: "file" | "dir" };
 
